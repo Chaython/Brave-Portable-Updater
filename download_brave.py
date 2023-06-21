@@ -33,6 +33,7 @@ if latest_release:
         download_url = asset["browser_download_url"]
 
         # Download the asset
+        print("Downloading asset...")
         response = requests.get(download_url)
 
         # Save the asset to a file
@@ -47,6 +48,7 @@ if latest_release:
         if os.path.exists(extract_dir):
             shutil.rmtree(extract_dir)
 
+        print("Extracting asset...")
         with zipfile.ZipFile(filename, "r") as zip_ref:
             zip_ref.extractall(extract_dir)
 
