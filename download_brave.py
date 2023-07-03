@@ -1,7 +1,16 @@
-import requests
+import subprocess
+import sys
+
+# Upgrade pip
+subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "pip"])
+
+# Install the requests library
+subprocess.check_call([sys.executable, "-m", "pip", "install", "requests"])
+
 import zipfile
 import os
 import shutil
+import requests
 
 # Set the owner and repository
 owner = "brave"
@@ -14,11 +23,15 @@ url = f"https://api.github.com/repos/{owner}/{repo}/releases"
 response = requests.get(url)
 releases = response.json()
 
-# Find the release with the highest build number
+# Find the most recent release with the required asset
 latest_release = None
 for release in releases:
-    if not latest_release or release["tag_name"] > latest_release["tag_name"]:
-        latest_release = release
+    for a in release["assets"]:
+        if a["name"].endswith("win32-x64.zip"):
+            latest_release = release
+            break
+    if latest_release:
+        break
 
 if latest_release:
     # Find the asset with a name ending in win32-x64.zip
