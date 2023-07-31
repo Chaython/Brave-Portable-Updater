@@ -1,8 +1,8 @@
 # Set the parameters
 $TaskName = "BravePortableUpdate"
 $TaskDescription = "Update brave portable at boot"
-$TaskCommand = "\download_brave.py"
-$TaskArguments = "\download_brave.py"
+$TaskCommand = "\download_brave.ps1"
+$TaskArguments = "\download_brave.ps1"
 $TaskTrigger = New-ScheduledTaskTrigger -AtStartup
 
 # Create the action
