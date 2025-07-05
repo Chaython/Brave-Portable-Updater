@@ -15,6 +15,6 @@ For Stable:
 
 It should now also check if the version is in place and skip downloading if it is.
 
-⚠ If you want to run at boot edit the script to point towards the download_brave.ps1 ⚠
+If you want to run at boot edit the script to point towards the download_brave.ps1. [if its in the same directory as download_brave.ps1 it should now find it automatically however.] 
 
 This is currently configured for Windows, as brave-portable is for Windows. Therefore I am now deprecating .py and .js
