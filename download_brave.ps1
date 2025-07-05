@@ -1,68 +1,85 @@
-# Set the owner and repository
-$owner = "brave"
-$repo = "brave-browser"
+param(
+    [ValidateSet("nightly", "beta", "stable")]
+    [string]$Edition = "nightly",
+    [string]$OutDir = "."
+)
 
-# Set the URL for the releases
-$url = "https://api.github.com/repos/$owner/$repo/releases"
+$appDir = ".\app"
 
-# Get the releases information
-$response = Invoke-RestMethod -Uri $url
-$releases = $response
+# --- MAP EDITION TO TITLE KEYWORD ---
+$editionTitleMap = @{
+    "nightly" = "Nightly"
+    "beta"    = "Beta"
+    "stable"  = "Release"
+}
+$editionKeyword = $editionTitleMap[$Edition.ToLower()]
 
-# Find the most recent release with the required asset
-$latestRelease = $null
-foreach ($release in $releases) {
-    foreach ($a in $release.assets) {
-        if ($a.name.EndsWith("win32-x64.zip")) {
-            $latestRelease = $release
-            break
-        }
-    }
-    if ($latestRelease -ne $null) {
-        break
-    }
+Write-Host "Looking for Brave $editionKeyword releases..."
+
+# --- GET GITHUB RELEASES ---
+$releasesUrl = "https://api.github.com/repos/brave/brave-browser/releases?per_page=30"
+try {
+    $releases = Invoke-RestMethod -Uri $releasesUrl -Headers @{"User-Agent"="Brave-Updater"}
+} catch {
+    Write-Error "Failed to fetch releases from GitHub."
+    exit 1
 }
 
-if ($latestRelease -ne $null) {
-    # Find the asset with a name ending in win32-x64.zip
-    $asset = $null
-    foreach ($a in $latestRelease.assets) {
-        if ($a.name.EndsWith("win32-x64.zip")) {
-            $asset = $a
-            break
-        }
-    }
+# Find the first release whose name/title contains the edition keyword
+$release = $releases | Where-Object { $_.name -match $editionKeyword } | Select-Object -First 1
 
-    if ($asset -ne $null) {
-        # Get the download URL for the asset
-        $downloadUrl = $asset.browser_download_url
+if (-not $release) {
+    Write-Error "No release found with title containing '$editionKeyword'."
+    exit 1
+}
 
-        # Download the asset
-        Write-Host "Downloading asset..."
-        $response = Invoke-WebRequest -Uri $downloadUrl
+# Release version is like 'v1.82.54'; strip 'v'
+$version = $release.tag_name.TrimStart("v")
+Write-Host "Latest $Edition version: $version"
 
-        # Save the asset to a file
-        $filename = [System.IO.Path]::GetFileName($downloadUrl)
-        [System.IO.File]::WriteAllBytes($filename, $response.Content)
-
-        # Extract the asset to the specified directory
-        $extractDir = ".\app"
-
-        # Delete existing data in the specified directory
-        if (Test-Path -Path $extractDir) {
-            Remove-Item -Path $extractDir -Recurse -Force
-        }
-
-        Write-Host "Extracting asset..."
-        Expand-Archive -Path $filename -DestinationPath $extractDir
-
-        # Delete the downloaded file
-        Remove-Item -Path $filename
-
-        Write-Host "Extraction completed successfully"
+# --- CHECK IF LATEST IS ALREADY DOWNLOADED (by folder in app\ that ends with $version) ---
+$currentVersionFolder = $null
+if (Test-Path $appDir) {
+    $dirs = Get-ChildItem -Path $appDir -Directory | Where-Object { $_.Name -like "*$version" }
+    if ($dirs.Count -ge 1) {
+        $currentVersionFolder = $dirs[0].FullName
+        Write-Host "The latest version ($version) is already downloaded in $($dirs[0].Name)."
+        exit 0
     } else {
-        Write-Host "Asset not found"
+        Write-Host "No matching version directory found, cleaning up any old versions."
+        # Remove all subfolders in app\
+        Get-ChildItem -Path $appDir -Directory | Remove-Item -Recurse -Force
     }
 } else {
-    Write-Host "No releases found"
+    New-Item -ItemType Directory -Path $appDir | Out-Null
+    Write-Host "Created app directory."
 }
+
+# --- DOWNLOAD ZIP ASSET ---
+$asset = $release.assets | Where-Object { $_.name -match "^brave-v.*-win32-x64\.zip$" } | Select-Object -First 1
+if (-not $asset) {
+    Write-Error "No Windows x64 zip asset found in release."
+    exit 1
+}
+
+$downloadUrl = $asset.browser_download_url
+$zipFile = "$OutDir\$($asset.name)"
+
+# Delete any old archive file
+if (Test-Path $zipFile) {
+    Remove-Item $zipFile -Force
+    Write-Host "Deleted old archive: $zipFile"
+}
+
+Write-Host "Downloading $downloadUrl ..."
+Invoke-WebRequest -Uri $downloadUrl -OutFile $zipFile
+
+# --- EXTRACT NEW ZIP DIRECTLY TO app\ ---
+Write-Host "Extracting $zipFile to $appDir ..."
+Expand-Archive -Path $zipFile -DestinationPath $appDir -Force
+
+# --- CLEAN UP ARCHIVE ---
+Remove-Item $zipFile -Force
+Write-Host "Removed archive: $zipFile"
+
+Write-Host "Brave $Edition ($version) has been downloaded and extracted to $appDir."
