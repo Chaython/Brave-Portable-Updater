@@ -7,6 +7,8 @@ A PowerShell-based utility to download and extract the latest Brave Portable edi
 
 - download_brave.ps1: Primary logic script for edition targeting, version checking, and downloading.
 - update.bat: Auxiliary launcher to bypass certificate checks for simpler execution.
+- update_then_run_brave.bat: Auxiliary launcher to bypass certificate checks the launches brave for simplest execution.
+- run_at_boot.ps1: Should integrate download_brave.ps1 into the system scheduler to check for updates at system boot.
 
 
 🚀 Usage
