@@ -16,6 +16,12 @@ $editionKeyword = $editionTitleMap[$Edition.ToLower()]
 
 Write-Host "Looking for Brave $editionKeyword releases..."
 
+# --- CHECK EXECUTION POLICY ---
+$currentPolicy = Get-ExecutionPolicy -Scope CurrentUser
+if ($currentPolicy -eq "Restricted" -or $currentPolicy -eq "AllSigned") {
+    Write-Warning "Current PowerShell execution policy ($currentPolicy) may prevent script execution. Consider running with: powershell -ExecutionPolicy Bypass -File .\download_brave.ps1"
+}
+
 # --- GET GITHUB RELEASES ---
 $releasesUrl = "https://api.github.com/repos/brave/brave-browser/releases?per_page=30"
 try {
@@ -25,61 +31,115 @@ try {
     exit 1
 }
 
-# Find the first release whose name/title contains the edition keyword
-$release = $releases | Where-Object { $_.name -match $editionKeyword } | Select-Object -First 1
+# Find all releases matching the edition keyword
+$matchingReleases = $releases | Where-Object { $_.name -match $editionKeyword }
 
-if (-not $release) {
-    Write-Error "No release found with title containing '$editionKeyword'."
+if (-not $matchingReleases) {
+    Write-Error "No releases found with title containing '$editionKeyword'."
     exit 1
 }
 
-# Release version is like 'v1.82.54'; strip 'v'
-$version = $release.tag_name.TrimStart("v")
-Write-Host "Latest $Edition version: $version"
-
-# --- CHECK IF LATEST IS ALREADY DOWNLOADED (by folder in app\ that ends with $version) ---
-$currentVersionFolder = $null
-if (Test-Path $appDir) {
-    $dirs = Get-ChildItem -Path $appDir -Directory | Where-Object { $_.Name -like "*$version" }
-    if ($dirs.Count -ge 1) {
-        $currentVersionFolder = $dirs[0].FullName
-        Write-Host "The latest version ($version) is already downloaded in $($dirs[0].Name)."
-        exit 0
-    } else {
-        Write-Host "No matching version directory found, cleaning up any old versions."
-        # Remove all subfolders in app\
-        Get-ChildItem -Path $appDir -Directory | Remove-Item -Recurse -Force
+# Iterate through matching releases to find the first with a Windows x64 zip
+$selectedRelease = $null
+$version = $null
+foreach ($release in $matchingReleases) {
+    $asset = $release.assets | Where-Object { $_.name -match "^brave-v.*-win32-x64\.zip$" } | Select-Object -First 1
+    if ($asset) {
+        $selectedRelease = $release
+        $version = $release.tag_name.TrimStart("v")
+        Write-Host "Found $Edition version with Windows x64 asset: $version"
+        break
     }
-} else {
-    New-Item -ItemType Directory -Path $appDir | Out-Null
-    Write-Host "Created app directory."
+}
+
+if (-not $selectedRelease) {
+    Write-Error "No Windows x64 zip asset found in any $editionKeyword release."
+    exit 1
+}
+
+# --- CHECK IF SELECTED VERSION IS ALREADY DOWNLOADED OR NEWER ---
+$currentVersionFolder = $null
+$currentVersion = $null
+if (Test-Path $appDir) {
+    $dirs = Get-ChildItem -Path $appDir -Directory | Where-Object { $_.Name -match "\d+\.\d+\.\d+\.\d+" }
+    if ($dirs.Count -ge 1) {
+        # Extract the highest version number from folder names, ignoring the leading digits and decimal
+        $currentVersion = ($dirs | ForEach-Object { 
+            if ($_.Name -match "\d+\.(\d+\.\d+\.\d+)") { 
+                [Version]$matches[1] 
+            } 
+        } | Sort-Object -Descending | Select-Object -First 1)
+        
+        $currentVersionFolder = ($dirs | Where-Object { $_.Name -match [regex]::Escape($currentVersion) }).FullName
+        Write-Host "Current version in ${appDir}: $currentVersion"
+
+        # Compare selected version with current version
+        try {
+            $selectedVersionParsed = [Version]$version
+            if ($currentVersion -ge $selectedVersionParsed) {
+                Write-Host "The selected version ($version) is already downloaded or older than the current version ($currentVersion)."
+                exit 0
+            } else {
+                Write-Host "Selected version ($version) is newer than current version ($currentVersion), proceeding with download."
+            }
+        } catch {
+            Write-Warning "Could not parse version numbers for comparison. Proceeding with download."
+        }
+    }
 }
 
 # --- DOWNLOAD ZIP ASSET ---
-$asset = $release.assets | Where-Object { $_.name -match "^brave-v.*-win32-x64\.zip$" } | Select-Object -First 1
-if (-not $asset) {
-    Write-Error "No Windows x64 zip asset found in release."
-    exit 1
-}
-
+$asset = $selectedRelease.assets | Where-Object { $_.name -match "^brave-v.*-win32-x64\.zip$" } | Select-Object -First 1
 $downloadUrl = $asset.browser_download_url
 $zipFile = "$OutDir\$($asset.name)"
 
 # Delete any old archive file
 if (Test-Path $zipFile) {
-    Remove-Item $zipFile -Force
+    Remove-Item $zipFile -Force -ErrorAction SilentlyContinue
     Write-Host "Deleted old archive: $zipFile"
 }
 
 Write-Host "Downloading $downloadUrl ..."
 Invoke-WebRequest -Uri $downloadUrl -OutFile $zipFile
 
+# --- UNBLOCK DOWNLOADED ZIP TO PREVENT SMARTSCREEN PROMPTS ---
+Write-Host "Unblocking downloaded file to prevent SmartScreen prompts..."
+Unblock-File -Path $zipFile -ErrorAction SilentlyContinue
+
+# --- CLEAN UP OLD VERSIONS ---
+if (Test-Path $appDir) {
+    Write-Host "Cleaning up old versions in ${appDir}..."
+
+    # Terminate Brave processes to release file locks
+    Write-Host "Terminating any running Brave processes..."
+    Get-Process -Name "brave" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
+    # Remove read-only attributes from files
+    Write-Host "Removing read-only attributes from files in ${appDir}..."
+    Get-ChildItem -Path $appDir -Recurse -File | ForEach-Object {
+        if ($_.IsReadOnly) {
+            Set-ItemProperty -Path $_.FullName -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
+        }
+    }
+
+    # Delete old version directories with error handling
+    try {
+        Get-ChildItem -Path $appDir -Directory | Remove-Item -Recurse -Force -ErrorAction Stop
+    } catch {
+        Write-Warning "Failed to delete some files in ${appDir}: $($_.Exception.Message)"
+        Write-Warning "Continuing with extraction, but old files may remain."
+    }
+} else {
+    New-Item -ItemType Directory -Path $appDir | Out-Null
+    Write-Host "Created app directory."
+}
+
 # --- EXTRACT NEW ZIP DIRECTLY TO app\ ---
-Write-Host "Extracting $zipFile to $appDir ..."
+Write-Host "Extracting $zipFile to ${appDir} ..."
 Expand-Archive -Path $zipFile -DestinationPath $appDir -Force
 
 # --- CLEAN UP ARCHIVE ---
-Remove-Item $zipFile -Force
+Remove-Item $zipFile -Force -ErrorAction SilentlyContinue
 Write-Host "Removed archive: $zipFile"
 
-Write-Host "Brave $Edition ($version) has been downloaded and extracted to $appDir."
+Write-Host "Brave $Edition ($version) has been downloaded and extracted to ${appDir}."
