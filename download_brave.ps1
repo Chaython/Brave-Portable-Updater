@@ -63,7 +63,6 @@ $currentVersion = $null
 if (Test-Path $appDir) {
     $dirs = Get-ChildItem -Path $appDir -Directory | Where-Object { $_.Name -match "\d+\.\d+\.\d+\.\d+" }
     if ($dirs.Count -ge 1) {
-        # Extract the highest version number from folder names, ignoring the leading digits and decimal
         $currentVersion = ($dirs | ForEach-Object { 
             if ($_.Name -match "\d+\.(\d+\.\d+\.\d+)") { 
                 [Version]$matches[1] 
@@ -73,7 +72,6 @@ if (Test-Path $appDir) {
         $currentVersionFolder = ($dirs | Where-Object { $_.Name -match [regex]::Escape($currentVersion) }).FullName
         Write-Host "Current version in ${appDir}: $currentVersion"
 
-        # Compare selected version with current version
         try {
             $selectedVersionParsed = [Version]$version
             if ($currentVersion -ge $selectedVersionParsed) {
@@ -91,16 +89,37 @@ if (Test-Path $appDir) {
 # --- DOWNLOAD ZIP ASSET ---
 $asset = $selectedRelease.assets | Where-Object { $_.name -match "^brave-v.*-win32-x64\.zip$" } | Select-Object -First 1
 $downloadUrl = $asset.browser_download_url
-$zipFile = "$OutDir\$($asset.name)"
+$zipFile = Join-Path $OutDir $asset.name
 
-# Delete any old archive file
 if (Test-Path $zipFile) {
     Remove-Item $zipFile -Force -ErrorAction SilentlyContinue
     Write-Host "Deleted old archive: $zipFile"
 }
 
 Write-Host "Downloading $downloadUrl ..."
-Invoke-WebRequest -Uri $downloadUrl -OutFile $zipFile
+$downloadSucceeded = $false
+
+try {
+    Start-BitsTransfer -Source $downloadUrl -Destination $zipFile -DisplayName "Downloading Brave $Edition" -Description "Using BITS transfer" -ErrorAction Stop
+    $downloadSucceeded = $true
+    Write-Host "Download completed via BITS."
+} catch {
+    Write-Warning "BITS transfer failed: $($_.Exception.Message)"
+    Write-Host "Falling back to Invoke-WebRequest..."
+    try {
+        Invoke-WebRequest -Uri $downloadUrl -OutFile $zipFile -UseBasicParsing -ErrorAction Stop
+        $downloadSucceeded = $true
+        Write-Host "Download completed via Invoke-WebRequest."
+    } catch {
+        Write-Error "Both BITS and Invoke-WebRequest failed to download the file."
+        exit 1
+    }
+}
+
+if (-not $downloadSucceeded) {
+    Write-Error "Download failed."
+    exit 1
+}
 
 # --- UNBLOCK DOWNLOADED ZIP TO PREVENT SMARTSCREEN PROMPTS ---
 Write-Host "Unblocking downloaded file to prevent SmartScreen prompts..."
@@ -110,11 +129,9 @@ Unblock-File -Path $zipFile -ErrorAction SilentlyContinue
 if (Test-Path $appDir) {
     Write-Host "Cleaning up old versions in ${appDir}..."
 
-    # Terminate Brave processes to release file locks
     Write-Host "Terminating any running Brave processes..."
     Get-Process -Name "brave" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 
-    # Remove read-only attributes from files
     Write-Host "Removing read-only attributes from files in ${appDir}..."
     Get-ChildItem -Path $appDir -Recurse -File | ForEach-Object {
         if ($_.IsReadOnly) {
@@ -122,7 +139,6 @@ if (Test-Path $appDir) {
         }
     }
 
-    # Delete old version directories with error handling
     try {
         Get-ChildItem -Path $appDir -Directory | Remove-Item -Recurse -Force -ErrorAction Stop
     } catch {
