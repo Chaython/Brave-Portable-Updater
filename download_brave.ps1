@@ -23,7 +23,7 @@ if ($currentPolicy -eq "Restricted" -or $currentPolicy -eq "AllSigned") {
 }
 
 # --- GET GITHUB RELEASES ---
-$releasesUrl = "https://api.github.com/repos/brave/brave-browser/releases?per_page=30"
+$releasesUrl = "https://api.github.com/repos/brave/brave-browser/releases?per_page=80"
 try {
     $releases = Invoke-RestMethod -Uri $releasesUrl -Headers @{"User-Agent"="Brave-Updater"}
 } catch {
@@ -159,3 +159,4 @@ Remove-Item $zipFile -Force -ErrorAction SilentlyContinue
 Write-Host "Removed archive: $zipFile"
 
 Write-Host "Brave $Edition ($version) has been downloaded and extracted to ${appDir}."
+
