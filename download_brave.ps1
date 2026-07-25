@@ -39,7 +39,7 @@ param(
     [switch]$Force
 )
 
-$ErrorActionPreference = "Stop"
+ $ErrorActionPreference = "Stop"
 
 # --- RESOLVE PATHS RELATIVE TO THE SCRIPT, NOT THE CURRENT WORKING DIRECTORY ---
 if ([string]::IsNullOrWhiteSpace($OutDir)) {
@@ -48,27 +48,27 @@ if ([string]::IsNullOrWhiteSpace($OutDir)) {
 if (-not (Test-Path $OutDir)) {
     New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
 }
-$OutDir  = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutDir)
-$appDir  = Join-Path $OutDir "app"
+ $OutDir  = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutDir)
+ $appDir  = Join-Path $OutDir "app"
 
 # --- MAP EDITION TO TITLE KEYWORD (as used in GitHub release names) ---
-$editionTitleMap = @{
+ $editionTitleMap = @{
     "nightly" = "Nightly"
     "beta"    = "Beta"
     "stable"  = "Release"
 }
-$editionKeyword = $editionTitleMap[$Edition.ToLower()]
+ $editionKeyword = $editionTitleMap[$Edition.ToLower()]
 
 Write-Host "Looking for Brave $editionKeyword releases..."
 
 # --- CHECK EXECUTION POLICY ---
-$currentPolicy = Get-ExecutionPolicy -Scope CurrentUser
+ $currentPolicy = Get-ExecutionPolicy -Scope CurrentUser
 if ($currentPolicy -eq "Restricted" -or $currentPolicy -eq "AllSigned") {
     Write-Warning "Current PowerShell execution policy ($currentPolicy) may prevent script execution. Consider running with: powershell -ExecutionPolicy Bypass -File .\download_brave.ps1"
 }
 
 # --- GET GITHUB RELEASES ---
-$releasesUrl = "https://api.github.com/repos/brave/brave-browser/releases?per_page=80"
+ $releasesUrl = "https://api.github.com/repos/brave/brave-browser/releases?per_page=80"
 try {
     $releases = Invoke-RestMethod -Uri $releasesUrl -Headers @{ "User-Agent" = "Brave-Updater" } -ErrorAction Stop
 } catch {
@@ -77,7 +77,7 @@ try {
 }
 
 # Find all releases matching the edition keyword
-$matchingReleases = @($releases | Where-Object { $_.name -match $editionKeyword })
+ $matchingReleases = @($releases | Where-Object { $_.name -match $editionKeyword })
 
 if ($matchingReleases.Count -eq 0) {
     Write-Error "No releases found with title containing '$editionKeyword'."
@@ -85,8 +85,8 @@ if ($matchingReleases.Count -eq 0) {
 }
 
 # Iterate through matching releases to find the first with a Windows x64 zip
-$selectedRelease = $null
-$version = $null
+ $selectedRelease = $null
+ $version = $null
 foreach ($release in $matchingReleases) {
     $asset = $release.assets | Where-Object { $_.name -match "^brave-v.*-win32-x64\.zip$" } | Select-Object -First 1
     if ($asset) {
@@ -103,33 +103,31 @@ if (-not $selectedRelease) {
 }
 
 # --- CHECK IF SELECTED VERSION IS ALREADY DOWNLOADED OR NEWER ---
+# Brave changed their zip internals: the extracted folder now uses the Chromium
+# version (e.g. 151.0.7922.34) instead of the Brave release version (e.g.
+# 1.95.8). Since 151 > 1, naive folder-name parsing breaks version comparison
+# and future updates are skipped.  We instead track the Brave release version in
+# a marker file (app/.brave-portable-version) written after each extraction.
+ $versionFile = Join-Path $appDir ".brave-portable-version"
+
 if (-not $Force) {
     $currentVersion = $null
-    if (Test-Path $appDir) {
-        # Match directories whose name contains a 3- or 4-part version number
-        # (e.g. "1.65.123", "1.65.123.0", "brave-v1.65.123-win32-x64").
-        $dirs = Get-ChildItem -Path $appDir -Directory | Where-Object { $_.Name -match "\d+(\.\d+){2,3}" }
-        if ($dirs) {
-            $currentVersion = ($dirs | ForEach-Object {
-                if ($_.Name -match "(\d+(?:\.\d+){2,3})") {
-                    try { [Version]$matches[1] } catch { $null }
-                }
-            } | Where-Object { $_ -ne $null } | Sort-Object -Descending | Select-Object -First 1)
-
-            if ($currentVersion) {
-                Write-Host "Current version in app folder: $currentVersion"
-                try {
-                    $selectedVersionParsed = [Version]$version
-                    if ($currentVersion -ge $selectedVersionParsed) {
-                        Write-Host "The selected version ($version) is already downloaded or older than the current version ($currentVersion). Nothing to do."
-                        exit 0
-                    } else {
-                        Write-Host "Selected version ($version) is newer than current version ($currentVersion), proceeding with download."
-                    }
-                } catch {
-                    Write-Warning "Could not parse version numbers for comparison. Proceeding with download."
-                }
+    if ((Test-Path $appDir) -and (Test-Path $versionFile)) {
+        $currentVersion = (Get-Content -Path $versionFile -Raw).Trim()
+    }
+    if ($currentVersion) {
+        Write-Host "Current version in app folder: $currentVersion"
+        try {
+            $selectedVersionParsed = [Version]$version
+            $currentVersionParsed  = [Version]$currentVersion
+            if ($currentVersionParsed -ge $selectedVersionParsed) {
+                Write-Host "The selected version ($version) is already downloaded or older than the current version ($currentVersion). Nothing to do."
+                exit 0
+            } else {
+                Write-Host "Selected version ($version) is newer than current version ($currentVersion), proceeding with download."
             }
+        } catch {
+            Write-Warning "Could not parse version numbers for comparison. Proceeding with download."
         }
     }
 } else {
@@ -137,9 +135,9 @@ if (-not $Force) {
 }
 
 # --- DOWNLOAD ZIP ASSET ---
-$asset = $selectedRelease.assets | Where-Object { $_.name -match "^brave-v.*-win32-x64\.zip$" } | Select-Object -First 1
-$downloadUrl = $asset.browser_download_url
-$zipFile = Join-Path $OutDir $asset.name
+ $asset = $selectedRelease.assets | Where-Object { $_.name -match "^brave-v.*-win32-x64\.zip$" } | Select-Object -First 1
+ $downloadUrl = $asset.browser_download_url
+ $zipFile = Join-Path $OutDir $asset.name
 
 if (Test-Path $zipFile) {
     Remove-Item $zipFile -Force -ErrorAction SilentlyContinue
@@ -147,7 +145,7 @@ if (Test-Path $zipFile) {
 }
 
 Write-Host "Downloading $downloadUrl ..."
-$downloadSucceeded = $false
+ $downloadSucceeded = $false
 
 # Try BITS transfer first (supports resume/background), fall back to Invoke-WebRequest
 try {
@@ -204,6 +202,13 @@ if (Test-Path $appDir) {
 # --- EXTRACT NEW ZIP DIRECTLY TO app\ ---
 Write-Host "Extracting $zipFile to $appDir ..."
 Expand-Archive -Path $zipFile -DestinationPath $appDir -Force
+
+# --- RECORD DOWNLOADED VERSION ---
+# Store the Brave release version from the GitHub tag, NOT the Chromium
+# version from the extracted folder name.  This ensures future update
+# comparisons stay correct even when Brave changes their folder naming.
+Set-Content -Path $versionFile -Value $version -NoNewline -Encoding UTF8
+Write-Host "Version marker written: $version"
 
 # --- CLEAN UP ARCHIVE ---
 Remove-Item $zipFile -Force -ErrorAction SilentlyContinue
