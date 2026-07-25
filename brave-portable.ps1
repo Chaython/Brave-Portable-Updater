@@ -92,37 +92,37 @@ param(
     [switch]$NoWait
 )
 
-$ErrorActionPreference = "Stop"
-$ScriptDir = $PSScriptRoot
-$AppDir    = Join-Path $ScriptDir "app"
-$DataDir   = Join-Path $ScriptDir "Data"
-$RegDir    = Join-Path $DataDir "registry"
+ $ErrorActionPreference = "Stop"
+ $ScriptDir = $PSScriptRoot
+ $AppDir    = Join-Path $ScriptDir "app"
+ $DataDir   = Join-Path $ScriptDir "Data"
+ $RegDir    = Join-Path $DataDir "registry"
 
 # --- REGISTRY PATHS ---
 #  PowerShell provider form (HKCU:\...) for Test-Path / Set-ItemProperty
 #  and native form (HKCU\...) for reg.exe export / import.
-$BraveRegKeyPs     = "HKCU:\Software\BraveSoftware"
-$BraveRegKeyNative = "HKCU\Software\BraveSoftware"
-$PolicyRegKeyPs    = "HKCU:\Software\Policies\BraveSoftware\Brave"
-$PolicyParentPs    = "HKCU:\Software\Policies\BraveSoftware"
-$PolicyRootPs      = "HKCU:\Software\Policies"
+ $BraveRegKeyPs     = "HKCU:\Software\BraveSoftware"
+ $BraveRegKeyNative = "HKCU\Software\BraveSoftware"
+ $PolicyRegKeyPs    = "HKCU:\Software\Policies\BraveSoftware\Brave"
+ $PolicyParentPs    = "HKCU:\Software\Policies\BraveSoftware"
+ $PolicyRootPs      = "HKCU:\Software\Policies"
 
 # Stray keys Brave may create if it ever tries to register as default browser.
-$StrayKeysPs = @(
+ $StrayKeysPs = @(
     "HKCU:\Software\Clients\StartMenuInternet\BraveBrowser",
     "HKCU:\Software\Microsoft\Windows\CurrentVersion\App Paths\brave.exe",
     "HKCU:\Software\RegisteredApplications"
 )
 
 # --- PORTABLE STATE FILES ---
-$PortableRegFile    = Join-Path $RegDir "brave-portable.reg"
-$PreSessionRegFile  = Join-Path $RegDir "pre-session.reg"
-$RealInstallBackup  = Join-Path $RegDir "real-install-backup.reg"
+ $PortableRegFile    = Join-Path $RegDir "brave-portable.reg"
+ $PreSessionRegFile  = Join-Path $RegDir "pre-session.reg"
+ $RealInstallBackup  = Join-Path $RegDir "real-install-backup.reg"
 
 # ============================================================
 #  LOCATE brave.exe UNDER app\
 # ============================================================
-$braveExe = Get-ChildItem -Path $AppDir -Recurse -Filter "brave.exe" -File -ErrorAction SilentlyContinue |
+ $braveExe = Get-ChildItem -Path $AppDir -Recurse -Filter "brave.exe" -File -ErrorAction SilentlyContinue |
     Select-Object -First 1
 if (-not $braveExe) {
     Write-Error "brave.exe was not found under '$AppDir'. Run download_brave.ps1 first."
@@ -132,10 +132,10 @@ if (-not $braveExe) {
 # ============================================================
 #  CREATE THE PORTABLE DATA FOLDERS
 # ============================================================
-$profileDir     = Join-Path $DataDir "profile"
-$cacheDir       = Join-Path $DataDir "cache"
-$appdataRoaming = Join-Path $DataDir "AppData\Roaming"
-$appdataLocal   = Join-Path $DataDir "AppData\Local"
+ $profileDir     = Join-Path $DataDir "profile"
+ $cacheDir       = Join-Path $DataDir "cache"
+ $appdataRoaming = Join-Path $DataDir "AppData\Roaming"
+ $appdataLocal   = Join-Path $DataDir "AppData\Local"
 foreach ($d in @($profileDir, $cacheDir, $appdataRoaming, $appdataLocal, $RegDir)) {
     if (-not (Test-Path $d)) {
         New-Item -ItemType Directory -Path $d -Force | Out-Null
@@ -146,25 +146,25 @@ foreach ($d in @($profileDir, $cacheDir, $appdataRoaming, $appdataLocal, $RegDir
 #  LAYER 1: REDIRECT APPDATA ENV VARS
 #  brave.exe and every child process inherits these.
 # ============================================================
-$env:APPDATA      = $appdataRoaming
-$env:LOCALAPPDATA = $appdataLocal
+ $env:APPDATA      = $appdataRoaming
+ $env:LOCALAPPDATA = $appdataLocal
 
 # ============================================================
 #  LAYER 2: COMMAND-LINE FLAGS
 # ============================================================
-$argList = @(
+ $argList = @(
     "--user-data-dir=`"$profileDir`"",
     "--disk-cache-dir=`"$cacheDir`"",
     "--no-default-browser-check",
     "--disable-background-mode"
 )
 if ($BraveArgs) { $argList += $BraveArgs }
-$argString = $argList -join " "
+ $argString = $argList -join " "
 
 # ============================================================
 #  LAYER 4: REGISTRY BACKUP / RESTORE  (pre-launch)
 # ============================================================
-$registryManaged = $false
+ $registryManaged = $false
 if (-not $NoRegistry) {
 
     # (a) One-time safety backup of a real Brave install's registry, in case
@@ -173,7 +173,7 @@ if (-not $NoRegistry) {
     if ((-not (Test-Path $PortableRegFile)) -and
         (Test-Path $BraveRegKeyPs) -and
         (-not (Test-Path $RealInstallBackup))) {
-        & reg.exe export $BraveRegKeyNative "$RealInstallBackup" /y 2>$null | Out-Null
+        cmd /c "reg.exe export $BraveRegKeyNative `"$RealInstallBackup`" /y >nul 2>&1"
         if (Test-Path $RealInstallBackup) {
             Write-Host "[registry] One-time backup of existing Brave install -> real-install-backup.reg"
         }
@@ -182,7 +182,7 @@ if (-not $NoRegistry) {
     # (b) Snapshot whatever is in the live key right now (real-install state,
     #     leftover portable state, or nothing) so we can restore it after.
     if (Test-Path $BraveRegKeyPs) {
-        & reg.exe export $BraveRegKeyNative "$PreSessionRegFile" /y 2>$null | Out-Null
+        cmd /c "reg.exe export $BraveRegKeyNative `"$PreSessionRegFile`" /y >nul 2>&1"
         Write-Host "[registry] Snapshotted live state -> pre-session.reg"
     } else {
         if (Test-Path $PreSessionRegFile) { Remove-Item $PreSessionRegFile -Force -ErrorAction SilentlyContinue }
@@ -195,7 +195,7 @@ if (-not $NoRegistry) {
 
     # (d) Import portable state from the previous session (if any).
     if (Test-Path $PortableRegFile) {
-        & reg.exe import "$PortableRegFile" 2>$null | Out-Null
+        cmd /c "reg.exe import `"$PortableRegFile`" >nul 2>&1"
         Write-Host "[registry] Restored portable state <- brave-portable.reg"
     }
 
@@ -217,7 +217,7 @@ if (-not $NoRegistry) {
 #  Brave fully portable. Policy injection is belt-and-suspenders for
 #  helper processes that might not inherit the flags.
 # ============================================================
-$policyInjected = $false
+ $policyInjected = $false
 if (-not $NoPolicy) {
     try {
         if (-not (Test-Path $PolicyRegKeyPs)) {
@@ -273,7 +273,7 @@ try {
 
     # (e) Persist this session's portable registry state.
     if ($registryManaged -and (Test-Path $BraveRegKeyPs)) {
-        & reg.exe export $BraveRegKeyNative "$PortableRegFile" /y 2>$null | Out-Null
+        cmd /c "reg.exe export $BraveRegKeyNative `"$PortableRegFile`" /y >nul 2>&1"
         Write-Host "[registry] Saved portable state -> brave-portable.reg"
         # (f) Delete the live key.
         Remove-Item -Path $BraveRegKeyPs -Recurse -Force -ErrorAction SilentlyContinue
@@ -316,7 +316,7 @@ try {
 
     # (i) Restore the pre-session registry state (real install or empty).
     if ($registryManaged -and (Test-Path $PreSessionRegFile)) {
-        & reg.exe import "$PreSessionRegFile" 2>$null | Out-Null
+        cmd /c "reg.exe import `"$PreSessionRegFile`" >nul 2>&1"
         Remove-Item $PreSessionRegFile -Force -ErrorAction SilentlyContinue
         Write-Host "[registry] Restored pre-session live state."
     }
