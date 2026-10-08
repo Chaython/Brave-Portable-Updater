@@ -108,6 +108,37 @@ pub fn wait_for_brave_exit()->Result<()> {
         }
     }
 }
+/// Explicit recovery only: never restore host keys while Brave is running.
+pub fn recover(root:&Path)->Result<()> {
+    let _lock=Mutex::lock()?;
+    ensure_no_brave()?;
+    let folder=root.join("Data").join("Registry");
+    let journal=folder.join("active-session.json");
+    if !journal.exists() {return Err("No interrupted registry session to recover".into());}
+    let state:State=serde_json::from_slice(&fs::read(&journal)?)?;
+    if state.keys.is_empty() {return Err("Recovery journal has no registry keys".into());}
+    for entry in &state.keys {
+        if entry.key != REGISTRY && entry.key != POLICY {return Err("Recovery journal contains an unexpected registry key".into());}
+        if entry.existed {
+            let backup=folder.join(&entry.backup);
+            if !backup.is_file() {return Err(format!("Recovery backup missing: {}", backup.display()).into());}
+            let canonical_folder=fs::canonicalize(&folder)?;
+            let canonical_backup=fs::canonicalize(&backup)?;
+            if !canonical_backup.starts_with(&canonical_folder) {return Err("Recovery backup escapes registry folder".into());}
+        }
+    }
+    // Preserve the journal if any restore step fails so recovery can be retried.
+    let mut errors=Vec::new();
+    for entry in &state.keys {
+        if let Err(e)=delete(&entry.key) {errors.push(format!("Delete {}: {e}",entry.key));continue;}
+        if entry.existed {
+            if let Err(e)=import(&folder.join(&entry.backup)) {errors.push(format!("Restore {}: {e}",entry.key));}
+        }
+    }
+    if !errors.is_empty() {return Err(errors.join("; ").into());}
+    fs::remove_file(&journal)?;
+    Ok(())
+}
 pub struct Session {folder:PathBuf,journal:PathBuf,state:State,_lock:Mutex}
 impl Session {
     pub fn start(root:&Path,profile:&Path,cache:&Path,include_registry:bool,include_policy:bool)->Result<Self>{
