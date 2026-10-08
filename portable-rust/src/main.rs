@@ -120,6 +120,8 @@ struct DownloadOptions {
     no_download: bool,
     update_only: bool,
     no_wait: bool,
+    no_registry: bool,
+    no_policy: bool,
     passthrough: Vec<OsString>,
 }
 fn parse_options(config: &Settings) -> Result<DownloadOptions, Box<dyn std::error::Error>> {
@@ -128,6 +130,8 @@ fn parse_options(config: &Settings) -> Result<DownloadOptions, Box<dyn std::erro
     let mut no_download = false;
     let mut update_only = false;
     let mut no_wait = false;
+    let mut no_registry = false;
+    let mut no_policy = false;
     let mut passthrough = Vec::new();
     let mut args = env::args_os().skip(1);
     let mut forwarding = false;
@@ -136,6 +140,8 @@ fn parse_options(config: &Settings) -> Result<DownloadOptions, Box<dyn std::erro
         if !forwarding && value == "--" { forwarding = true; continue; }
         if !forwarding && matches!(value.as_ref(), "--update" | "--force" | "-Force") { force_update = true; continue; }
         if !forwarding && value == "--update-only" { update_only = true; force_update = true; continue; }
+        if !forwarding && matches!(value.as_ref(), "-NoRegistry" | "--no-registry") { no_registry = true; continue; }
+        if !forwarding && matches!(value.as_ref(), "-NoPolicy" | "--no-policy") { no_policy = true; continue; }
         if !forwarding && matches!(value.as_ref(), "-NoWait" | "--no-wait") { no_wait = true; continue; }
         if !forwarding && value == "--no-download" { no_download = true; continue; }
         if !forwarding && (value == "--edition" || value == "-Edition") {
@@ -153,7 +159,7 @@ fn parse_options(config: &Settings) -> Result<DownloadOptions, Box<dyn std::erro
         return Err("Edition must be stable, beta or nightly".into());
     }
     if force_update && no_download { return Err("--update conflicts with --no-download".into()); }
-    Ok(DownloadOptions { edition, force_update, no_download, update_only, no_wait, passthrough })
+    Ok(DownloadOptions { edition, force_update, no_download, update_only, no_wait, no_registry, no_policy, passthrough })
 }
 
 fn release_asset(client: &reqwest::blocking::Client, edition: &str)
@@ -351,12 +357,12 @@ fn launch() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    if options.no_wait && config.registry_virtualization == "swap" {
+    if options.no_wait && config.registry_virtualization == "swap" && !(options.no_registry && options.no_policy) {
         return Err("-NoWait is unsafe with registry swapping; set registry_virtualization to off".into());
     }
-    let session = if config.registry_virtualization == "swap" {
+    let session = if config.registry_virtualization == "swap" && !(options.no_registry && options.no_policy) {
         append_log(root, "WARNING: starting temporary HKCU Brave and group-policy registry swap (NOT virtualization)");
-        Some(registry_swap::Session::start(root, &profile, &cache)?)
+        Some(registry_swap::Session::start(root, &profile, &cache, !options.no_registry, !options.no_policy)?)
     } else { None };
     let run_browser = || -> Result<(), Box<dyn std::error::Error>> {
     let mut child = Command::new(&browser)
