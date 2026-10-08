@@ -25,7 +25,7 @@ Supported launcher arguments:
 .\BravePortable.exe -- --incognito          # forward browser arguments
 ```
 
-`--edition` chooses which release to download but does not replace an existing installation unless `--update` is also supplied. Avoid `--update` while portable Brave processes are running; this still needs explicit process-exclusion safeguards and Windows testing.
+`--edition` chooses which release to download but does not replace an existing installation unless `--update` is also supplied. Close all Brave instances before `--update`; the updater rejects a detected Brave process. Windows process detection still needs integration testing.
 
 ```text
 BravePortable.exe
@@ -36,7 +36,7 @@ Data/
   AppData/
 ```
 
-The launcher forwards arguments and relocates the profile, disk cache and child environment paths inside `Data/`. Everything it directly creates is relative to its executable. Download and installation diagnostics, launch status, and errors are recorded in `Data/Logs/launcher.log`. If launch fails, a Windows message box displays the error and details are appended to `Data/Logs/launcher.log`. Successful browser launches are logged too. If Brave itself immediately exits or redirects to another existing browser instance, inspect that log and close any existing Brave processes.
+The launcher forwards arguments and relocates the profile, disk cache and child environment paths inside `Data/`. Everything it directly creates is relative to its executable. Download and installation diagnostics, launch status, and errors are recorded in `Data/Logs/launcher.log`. If launch fails, a Windows message box displays the error and details are appended to `Data/Logs/launcher.log`. Successful browser launches are logged too. If Brave itself immediately exits or redirects to another existing browser instance, inspect that log and close any existing Brave processes. If an update was interrupted after moving App, the Rust updater can restore exactly one valid `.app-backup-*` folder when App is missing; multiple backups require manual selection.
 
 
 ## JSON settings and scheduling
@@ -68,7 +68,7 @@ To register/update the scheduler after placing `setup-scheduler.ps1` beside the 
 
 The scheduler runs `BravePortable.exe --update-only`, without opening a browser. The scheduler script requires no elevation in normal per-user configurations but Windows policy may limit registration. Change the frequency in JSON and **rerun setup-scheduler.ps1** to update the task. The current scheduler runs daily or weekly at 12:00 local time when the user is signed in. `launch` and `never` install no task. The JSON does not automatically register a task by itself.
 
-Other supported flags: `--update`, `--force` / `-Force`, `--edition stable|beta|nightly` / `-Edition`, `--no-download`, `--update-only`, and `--` for browser arguments. These are not complete equivalents of the PowerShell scripts: `-OutDir`, `-NoRegistry`, `-NoPolicy`, and `-NoWait` are not implemented in Rust. The Rust launcher now supports **opt-in temporary registry/group-policy swapping**, but still does not provide virtualization. Its settings are separate from other launcher versions.
+Other supported flags: `--update`, `--force` / `-Force`, `--edition stable|beta|nightly` / `-Edition`, `--no-download`, `--update-only`, and `--` for browser arguments. Rust now also recognizes `-NoRegistry` / `--no-registry`, `-NoPolicy` / `--no-policy`, and `-NoWait` / `--no-wait`. `-NoRegistry` and `-NoPolicy` selectively disable the corresponding layer only in swap mode. `-NoWait` is refused when swap mode still manages either layer; both must be disabled. `-OutDir` remains unsupported because portable state is intentionally tied to the executable folder. The Rust launcher now supports **opt-in temporary registry/group-policy swapping**, but still does not provide virtualization. Its settings are separate from other launcher versions.
 
 **Updates are blocked when any Brave process is running**, including unrelated installed Brave instances, to avoid replacing in-use executables. Close Brave and retry if an update fails. An interrupted update may leave `.app-backup-*` or `.app-staging-*` directories; do not delete them until you've confirmed your existing App works.
 
@@ -101,3 +101,10 @@ In swap mode, the Rust launcher:
 If Brave or the launcher crashes, `active-session.json` remains as a recovery warning and future swap launches refuse to proceed. **Recovery is manual**: close Brave, inspect that journal and the corresponding host snapshots, and restore only the original keys when safe. Do not delete the journal or old snapshots until recovery is complete.
 
 This mode is **experimental and can cause data loss**. It temporarily replaces the *whole* user BraveSoftware branch and its HKCU Brave policy subtree. It does not isolate HKLM policy, native registry access, or third-party Windows integrations. The tasklist-based process check can miss races, access-denied processes or process names that differ. Unexpected termination, simultaneous regular Brave startup, or policy permissions can prevent restoration. Back up the Windows registry before trying it. It is not appropriate where other Brave instances may run concurrently. It is a placeholder until genuine registry virtualization is implemented.
+
+
+## Safety fixes and remaining limitations
+
+The updater records its last check after a successful installation or a confirmed current version, not before a failed download. It attempts recovery from one interrupted binary backup. Registry queries fail closed on errors they cannot positively distinguish from a missing key. Waiting for all Brave processes is bounded to six hours; a timeout keeps the recovery journal and requires manual intervention.
+
+**Registry swap is still experimental.** Windows registry errors can be localized, concurrent processes can race after the initial scan, and crashes can leave altered keys. There is no unattended automatic registry recovery and no native registry virtualization. The named session mutex does not coordinate with the separate PowerShell launcher. Avoid using both swap implementations concurrently. An accurate Windows integration test is still required.
