@@ -38,6 +38,38 @@ Data/
 
 The launcher forwards arguments and relocates the profile, disk cache and child environment paths inside `Data/`. Everything it directly creates is relative to its executable. Download and installation diagnostics, launch status, and errors are recorded in `Data/Logs/launcher.log`. If launch fails, a Windows message box displays the error and details are appended to `Data/Logs/launcher.log`. Successful browser launches are logged too. If Brave itself immediately exits or redirects to another existing browser instance, inspect that log and close any existing Brave processes.
 
+
+## JSON settings and scheduling
+
+On first run, the launcher creates \`Data/settings.json\` beside the EXE:
+
+\`\`\`json
+{
+  "edition": "stable",
+  "update_frequency": "daily",
+  "check_on_launch": true,
+  "scheduled_updates": false
+}
+\`\`\`
+
+- \`edition\`: \`stable\`, \`beta\`, or \`nightly\`. A different channel is downloaded on the next due check; existing profiles remain in \`Data/Profile\`.
+- \`update_frequency\`: \`never\`, \`launch\`, \`daily\`, or \`weekly\`. The launcher remembers the last successful GitHub release check in \`Data/last-update-check\`; \`daily\` and \`weekly\` are minimum intervals, not background timers.
+- \`check_on_launch\`: whether ordinary launches perform due update checks. It does not disable first-time installation if Brave is missing.
+- \`scheduled_updates\`: opt-in to an external Windows Task Scheduler task.
+
+To register/update the scheduler after placing \`setup-scheduler.ps1\` beside the EXE:
+
+\`\`\`powershell
+.\setup-scheduler.ps1
+.\setup-scheduler.ps1 -Remove
+\`\`\`
+
+The scheduler runs \`BravePortable.exe --update-only\`, without opening a browser. The scheduler script requires no elevation in normal per-user configurations but Windows policy may limit registration. Change the frequency in JSON and **rerun setup-scheduler.ps1** to update the task. The current scheduler runs daily or weekly at 12:00 local time when the user is signed in. \`launch\` and \`never\` install no task. The JSON does not automatically register a task by itself.
+
+Other supported flags: \`--update\`, \`--force\` / \`-Force\`, \`--edition stable|beta|nightly\` / \`-Edition\`, \`--no-download\`, \`--update-only\`, and \`--\` for browser arguments. These are not complete equivalents of the PowerShell scripts: \`-OutDir\`, \`-NoRegistry\`, \`-NoPolicy\`, and \`-NoWait\` are not implemented in Rust. The Rust launcher continues to have **no registry/group-policy virtualization**, and its settings are separate from other launcher versions.
+
+**Updates are blocked when any Brave process is running**, including unrelated installed Brave instances, to avoid replacing in-use executables. Close Brave and retry if an update fails. An interrupted update may leave \`.app-backup-*\` or \`.app-staging-*\` directories; do not delete them until you've confirmed your existing App works.
+
 ## Registry limitations — important
 
 **This release does not virtualize the registry or group policy.** It deliberately does not export, delete, import, or mutate the system Brave registry or policy branches. Chrome/Brave can still perform Windows integration writes through operating-system APIs. `APPDATA` and `LOCALAPPDATA` environment redirection is not a security boundary.
