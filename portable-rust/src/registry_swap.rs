@@ -173,6 +173,13 @@ pub fn recover_snapshots(root:&Path)->Result<()> {
     if rollback.is_dir() {
         let manifest=rollback.join("manifest.json");
         let entries:Vec<(String,bool)>=serde_json::from_slice(&fs::read(&manifest)?)?;
+        let mut seen=std::collections::HashSet::new();
+        if entries.is_empty() || entries.len()>2 {return Err("Invalid rollback manifest size".into());}
+        for (name,existed) in &entries {
+            if !seen.insert(name.clone()) {return Err("Duplicate rollback entry".into());}
+            if name!="portable-brave.reg" && name!="portable-policy.reg" {return Err("Unexpected rollback name".into());}
+            if *existed && !rollback.join(name).is_file() {return Err("Rollback backup is missing".into());}
+        }
         for (name,existed) in entries {
             if name!="portable-brave.reg" && name!="portable-policy.reg" {return Err("Invalid rollback manifest entry".into());}
             let dest=folder.join(&name);
