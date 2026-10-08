@@ -118,6 +118,10 @@ param(
  $PortableRegFile    = Join-Path $RegDir "brave-portable.reg"
  $PreSessionRegFile  = Join-Path $RegDir "pre-session.reg"
  $RealInstallBackup  = Join-Path $RegDir "real-install-backup.reg"
+ $sessionFile = Join-Path $RegDir "active-session.marker"
+ $regMutex = $null
+ $regMutexHeld = $false
+ $registrySessionStarted = $false
 
 # ============================================================
 #  LOCATE brave.exe UNDER app\
@@ -169,6 +173,14 @@ if ($NoWait) { $NoRegistry = $true; $NoPolicy = $true }
 # ============================================================
  $registryManaged = $false
 if (-not $NoRegistry) {
+    $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value.Replace('-', '_')
+    $regMutex = New-Object System.Threading.Mutex($false, "Local\BravePortableRegistry_$sid")
+    try { $regMutexHeld = $regMutex.WaitOne(0) }
+    catch [Threading.AbandonedMutexException] { $regMutexHeld = $true }
+    if (-not $regMutexHeld) { throw 'Another portable Brave session is managing the registry.' }
+    if (Test-Path -LiteralPath $sessionFile) {
+        throw "An interrupted registry session was detected. Review and restore $PreSessionRegFile before launching again."
+    }
 
     # (a) One-time safety backup of a real Brave install's registry, in case
     #     the user has Brave installed system-wide and we're about to touch
@@ -194,7 +206,9 @@ if (-not $NoRegistry) {
 
     # (c) Delete the live key for a clean slate.
     if (Test-Path $BraveRegKeyPs) {
-        Remove-Item -Path $BraveRegKeyPs -Recurse -Force -ErrorAction SilentlyContinue
+        Set-Content -LiteralPath $sessionFile -Value (Get-Date -Format o) -Encoding ASCII
+        $registrySessionStarted = $true
+        Remove-Item -Path $BraveRegKeyPs -Recurse -Force -ErrorAction Stop
     }
 
     # (d) Import portable state from the previous session (if any).
@@ -208,6 +222,10 @@ if (-not $NoRegistry) {
         Write-Host "[registry] Restored portable state <- brave-portable.reg"
     }
 
+    if (-not $registrySessionStarted) {
+        Set-Content -LiteralPath $sessionFile -Value (Get-Date -Format o) -Encoding ASCII
+        $registrySessionStarted = $true
+    }
     $registryManaged = $true
 } else {
     Write-Host "[registry] Skipped (-NoRegistry)."
@@ -275,6 +293,12 @@ try {
     $proc = Start-Process -FilePath $braveExe.FullName -ArgumentList $argString -WorkingDirectory $ScriptDir -PassThru
     Write-Host "Brave PID: $($proc.Id). This window will stay open until Brave exits so registry cleanup can run."
     $proc.WaitForExit()
+    $exeRoot = [IO.Path]::GetFullPath($AppDir).TrimEnd([char]92) + [char]92
+    do {
+        Start-Sleep -Milliseconds 500
+        $remaining = @(Get-CimInstance Win32_Process -Filter "Name = 'brave.exe'" -ErrorAction Stop |
+            Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($exeRoot, [StringComparison]::OrdinalIgnoreCase) })
+    } while ($remaining.Count -gt 0)
     Write-Host ""
     Write-Host "Brave exited (code $($proc.ExitCode)). Running cleanup..."
 } finally {
@@ -298,9 +322,14 @@ try {
     if ($registryManaged -and (Test-Path $PreSessionRegFile)) {
         & reg.exe import $PreSessionRegFile | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "Registry restore failed. Backup retained at $PreSessionRegFile" }
-        Remove-Item $PreSessionRegFile -Force -ErrorAction SilentlyContinue
+        Remove-Item $PreSessionRegFile -Force -ErrorAction Stop
         Write-Host "[registry] Restored pre-session live state."
     }
 
-    Write-Host "Cleanup complete. The live registry is back to its pre-launch state."
+    if ($registrySessionStarted -and (Test-Path -LiteralPath $sessionFile)) {
+        Remove-Item -LiteralPath $sessionFile -Force -ErrorAction Stop
+    }
+    if ($regMutexHeld) { $regMutex.ReleaseMutex(); $regMutexHeld = $false }
+    if ($regMutex) { $regMutex.Dispose() }
+    Write-Host "Cleanup complete."
 }
