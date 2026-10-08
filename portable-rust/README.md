@@ -109,3 +109,15 @@ The updater records its last check after a successful installation or a confirme
 
 **Registry swap is still experimental.** Windows registry errors can be localized, concurrent processes can race after the initial scan, and crashes can leave altered keys. There is no unattended automatic registry recovery and no native registry virtualization. The named session mutex does not coordinate with the separate PowerShell launcher. Avoid using both swap implementations concurrently. An accurate Windows integration test is still required.
 \n\n## Additional update hardening\n\nUpdater operations now use an exclusive `Data/update.lock` file to avoid concurrent Rust binary replacement. Release-check timestamps are stored separately for Stable, Beta and Nightly. ZIP extraction has a 6 GB expanded-size cap. The scheduler setup script removes orphaned Rust update tasks whose executable paths no longer exist. Existing tasks for other working installations are preserved. The Rust registry mutex now uses the same current-user SID naming convention as the PowerShell launcher.\n\nThe six-hour process wait limit is a **recovery boundary, not automatic safe restoration**: if Brave is still open, host-registry restoration cannot safely proceed and manual recovery is required. The implementation has not been verified end-to-end on Windows.\n
+
+## Recover an interrupted registry-swap session
+
+The launcher now blocks **every normal launch**, including profile-only launches and update-only operations, while `Data/Registry/active-session.json` exists. This prevents silently running against an unresolved temporary registry state.
+
+After closing **all** Brave processes, inspect `Data/Registry/active-session.json` and its named `*-host-*.reg` backups. If these are the correct original Windows registry backups, explicitly invoke:
+
+```powershell
+.\BravePortable.exe --recover-registry
+```
+
+The command takes a cross-launcher mutex, refuses to run if Brave is detected, validates that expected backup files exist, then restores the saved HKCU Brave and Brave user-policy keys. On failure, it preserves the recovery journal for another attempt. **It changes the real registry and is not safe if unrelated changes occurred since the backup**; inspect or export the current keys first if that is possible. This is deliberate manual recovery, not an automatic or crash-proof transaction.
