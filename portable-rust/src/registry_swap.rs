@@ -116,6 +116,8 @@ pub fn recover(root:&Path)->Result<()> {
     let journal=folder.join("active-session.json");
     if !journal.exists() {return Err("No interrupted registry session to recover".into());}
     let state:State=serde_json::from_slice(&fs::read(&journal)?)?;
+    let mut seen=std::collections::HashSet::new();
+    if state.keys.len()>2 || state.keys.iter().any(|entry| !seen.insert(entry.key.clone())) {return Err("Recovery journal has duplicate or excessive keys".into());}
     if state.keys.is_empty() {return Err("Recovery journal has no registry keys".into());}
     for entry in &state.keys {
         if entry.key != REGISTRY && entry.key != POLICY {return Err("Recovery journal contains an unexpected registry key".into());}
