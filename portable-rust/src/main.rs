@@ -259,7 +259,6 @@ impl UpdateLock {
 }
 
 fn ensure_browser(root: &Path, options: &DownloadOptions) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    let _update_lock = UpdateLock::acquire(root)?;
     let app = root.join("App");
     // Recover the single safely identifiable backup before fetching a new release.
     if !app.exists() {
@@ -364,6 +363,7 @@ fn launch() -> Result<(), Box<dyn std::error::Error>> {
     if !options.no_download && !options.force_update && config.check_on_launch && check_due(root, &config.update_frequency, &options.edition) {
         options.force_update = true;
     }
+    let update_lock = UpdateLock::acquire(root)?;
     let browser = match ensure_browser(root, &options) {
         Ok(browser) => browser,
         Err(error) if !explicit_update && !options.update_only && !root.join("Data").join("Registry").join("active-session.json").exists() => {
@@ -423,6 +423,7 @@ fn launch() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
     };
     let launched = run_browser();
+    drop(update_lock);
     if let Some(session) = session {
         // Do not restore host registry while any Brave process may be alive.
         // If browser management fails, retain the journal and warn rather
