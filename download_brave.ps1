@@ -96,8 +96,10 @@ try {
     if (-not (Test-Path -LiteralPath $appDir) -and $orphanBackups.Count -eq 1) {
         Move-Item -LiteralPath $orphanBackups[0].FullName -Destination $appDir -ErrorAction Stop
         Write-Warning 'Restored a previous installation left by an interrupted update.'
+    } elseif (-not (Test-Path -LiteralPath $appDir) -and $orphanBackups.Count -gt 1) {
+        throw 'Multiple interrupted update backups exist and app is missing. Manual recovery required; backups were preserved.'
     } elseif ($orphanBackups.Count -gt 0) {
-        Write-Warning 'Previous update backups exist; inspect and remove them manually after confirming Brave works.'
+        Write-Warning 'Previous update backups exist; inspect them after confirming Brave works.'
     }
     # Never kill processes from a system-wide Brave installation.
     # Refuse to replace portable executables if any instance is using this app directory.
