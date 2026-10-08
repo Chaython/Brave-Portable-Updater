@@ -131,3 +131,14 @@ Explicit recovery now requires `--recover-registry --confirm-restore`. Before re
 ### Snapshot and update coordination
 
 Successful registry swapping removes `active-session.json` only after portable snapshot changes are committed. Before replacing snapshots, the launcher copies the previous versions into `Data/Registry/snapshot-rollback/` and attempts to restore them if a multi-file commit fails. If that directory remains after a crash, preserve it and inspect the previous and current snapshots; launching in swap mode will stop rather than discard an unresolved rollback. Registry recovery verifies each key's expected portable snapshot filename. An exclusive update lock stays open until normal Brave session handling finishes, reducing overlap with updater operations; `--no-wait` intentionally cannot retain that lock after its launcher exits. These measures do not provide an atomic Windows registry transaction or prevent unrelated Brave processes from starting.
+
+
+### Split-phase recovery and Windows x64 corrections
+
+Windows x64 native registry access now sign-extends `HKEY_CURRENT_USER` correctly. After restoring the host registry, the session journal records `host_restored: true`; manual registry recovery refuses to re-import historical host keys in that state. If a snapshot commit was interrupted **after host restoration**, close all Brave processes and run:
+
+```powershell
+.\\BravePortable.exe --recover-snapshots
+```
+
+This restores the previous portable snapshot generation from `Data/Registry/snapshot-rollback/` using its deletion-aware manifest. It does not alter host registry keys. If the journal instead indicates the host has **not** been restored, investigate the actual registry state before using the existing explicit `--recover-registry --confirm-restore` command. Recovery is still not crash-atomic across the Windows registry and the on-disk journal. The exclusive updater lock is now released after successful Brave process creation; concurrent launches are no longer held up for the entire browser session, although an update may still be denied while a Brave process is running.
