@@ -9,6 +9,12 @@ description = "Installation-free Brave portable launcher"
 name = "BravePortable"
 path = "src/main.rs"
 
+[dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
 [profile.release]
 lto = true
 strip = true
