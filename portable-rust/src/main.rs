@@ -124,7 +124,12 @@ fn verify_archive(path: &Path, digest: &str) -> Result<(), Box<dyn std::error::E
     }
     let mut hash = Sha256::new();
     let mut file = fs::File::open(path)?;
-    io::copy(&mut file, &mut hash)?;
+    let mut chunk = [0u8; 1024 * 1024];
+    loop {
+        let count = io::Read::read(&mut file, &mut chunk)?;
+        if count == 0 { break; }
+        hash.update(&chunk[..count]);
+    }
     let actual = format!("{:x}", hash.finalize());
     if !actual.eq_ignore_ascii_case(expected) {
         return Err("Downloaded Brave archive failed SHA-256 verification".into());
@@ -160,7 +165,7 @@ fn ensure_browser(root: &Path, options: &DownloadOptions) -> Result<PathBuf, Box
     append_log(root, &format!("Looking up Brave {} release", options.edition));
     let client = reqwest::blocking::Client::builder()
         .user_agent("Brave-Portable-Rust/0.1")
-        .timeout(std::time::Duration::from_secs(120))
+        .timeout(std::time::Duration::from_secs(900))
         .build()?;
     let (version, asset) = release_asset(&client, &options.edition)?;
     if asset.size == 0 || asset.size > 2_000_000_000 {
