@@ -66,6 +66,7 @@ struct Settings {
     update_frequency: String,
     check_on_launch: bool,
     scheduled_updates: bool,
+    registry_virtualization: String,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -74,6 +75,7 @@ impl Default for Settings {
             update_frequency: "daily".into(),
             check_on_launch: true,
             scheduled_updates: false,
+            registry_virtualization: "off".into(),
         }
     }
 }
@@ -91,6 +93,9 @@ fn settings(root: &Path) -> Result<Settings, Box<dyn std::error::Error>> {
     }
     if !matches!(parsed.update_frequency.as_str(), "never"|"launch"|"daily"|"weekly") {
         return Err("Data/settings.json: update_frequency must be never, launch, daily or weekly".into());
+    }
+    if !matches!(parsed.registry_virtualization.as_str(), "off" | "required") {
+        return Err("Data/settings.json: registry_virtualization must be off or required".into());
     }
     Ok(parsed)
 }
@@ -302,6 +307,9 @@ fn launch() -> Result<(), Box<dyn std::error::Error>> {
     let executable = env::current_exe()?;
     let root = executable.parent().ok_or("Launcher has no parent directory")?;
     let config = settings(root)?;
+    if config.registry_virtualization == "required" {
+        return Err("Full registry/group-policy virtualization is not implemented. Launch refused to protect host registry. Set registry_virtualization to off only if profile isolation is acceptable.".into());
+    }
     let mut options = parse_options(&config)?;
     if !options.no_download && !options.force_update && config.check_on_launch && check_due(root, &config.update_frequency) {
         options.force_update = true;
