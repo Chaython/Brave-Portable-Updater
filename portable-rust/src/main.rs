@@ -100,18 +100,18 @@ fn settings(root: &Path) -> Result<Settings, Box<dyn std::error::Error>> {
     }
     Ok(parsed)
 }
-fn check_due(root: &Path, frequency: &str) -> bool {
+fn check_due(root: &Path, frequency: &str, edition: &str) -> bool {
     if frequency == "never" { return false; }
     if frequency == "launch" { return true; }
-    let file = root.join("Data").join("last-update-check");
+    let file = root.join("Data").join(format!("last-update-check-{edition}"));
     let Ok(stamp) = fs::read_to_string(file) else { return true };
     let Ok(last) = stamp.trim().parse::<u64>() else { return true };
     let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|v| v.as_secs()).unwrap_or(0);
     now.saturating_sub(last) >= if frequency == "weekly" { 7*86400 } else { 86400 }
 }
-fn record_check(root: &Path) {
+fn record_check(root: &Path, edition: &str) {
     let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|v| v.as_secs()).unwrap_or(0);
-    let _ = fs::write(root.join("Data").join("last-update-check"), now.to_string());
+    let _ = fs::write(root.join("Data").join(format!("last-update-check-{edition}")), now.to_string());
 }
 
 struct DownloadOptions {
@@ -241,7 +241,22 @@ fn ensure_brave_closed() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+
+struct UpdateLock(fs::File);
+impl UpdateLock {
+    fn acquire(root: &Path) -> Result<Self, Box<dyn std::error::Error>> {
+        let lock = root.join("Data").join("update.lock");
+        fs::create_dir_all(lock.parent().ok_or("Invalid lock path")?)?;
+        // Windows rejects sharing violations for this file; held across download and replacement.
+        use std::os::windows::fs::OpenOptionsExt;
+        let file = fs::OpenOptions::new().create(true).read(true).write(true).share_mode(0).open(lock)
+            .map_err(|e| format!("Another Brave Portable operation holds the update lock: {e}"))?;
+        Ok(Self(file))
+    }
+}
+
 fn ensure_browser(root: &Path, options: &DownloadOptions) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let _update_lock = UpdateLock::acquire(root)?;
     let app = root.join("App");
     // Recover the single safely identifiable backup before fetching a new release.
     if !app.exists() {
@@ -272,7 +287,7 @@ fn ensure_browser(root: &Path, options: &DownloadOptions) -> Result<PathBuf, Box
     };
     let marker = fs::read_to_string(app.join(".brave-portable-version")).unwrap_or_default();
     if existing.is_some() && marker.trim() == format!("{}|{}", options.edition, version) {
-        record_check(root);
+        record_check(root, &options.edition);
         append_log(root, "Brave release is already current");
         return Ok(existing.unwrap());
     }
@@ -318,7 +333,7 @@ fn ensure_browser(root: &Path, options: &DownloadOptions) -> Result<PathBuf, Box
     let _ = fs::remove_file(&archive);
     if staging.exists() { let _ = fs::remove_dir_all(&staging); }
     install?;
-    record_check(root);
+    record_check(root, &options.edition);
     append_log(root, &format!("Installed Brave {version} in {}", app.display()));
     Ok(browser_in(&app)?)
 }
@@ -328,12 +343,12 @@ fn launch() -> Result<(), Box<dyn std::error::Error>> {
     let executable = env::current_exe()?;
     let root = executable.parent().ok_or("Launcher has no parent directory")?;
     let config = settings(root)?;
-    if config.registry_virtualization == "required" {
+    if config.registry_virtualization == "required" && !env::args_os().any(|arg| arg == "--update-only") {
         return Err("Full registry/group-policy virtualization is not implemented. Launch refused to protect host registry. Set registry_virtualization to off only if profile isolation is acceptable.".into());
     }
     let mut options = parse_options(&config)?;
     let explicit_update = options.force_update || options.update_only;
-    if !options.no_download && !options.force_update && config.check_on_launch && check_due(root, &config.update_frequency) {
+    if !options.no_download && !options.force_update && config.check_on_launch && check_due(root, &config.update_frequency, &options.edition) {
         options.force_update = true;
     }
     let browser = match ensure_browser(root, &options) {
