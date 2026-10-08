@@ -235,14 +235,42 @@ impl Session {
         let restored=self.restore_host();
         restored?;
         if let Some(error)=capture_error {return Err(format!("Portable registry capture failed; previous snapshots preserved: {error}").into());}
-        for (staged,output) in pending {
-            if staged.as_os_str().is_empty() { if output.exists() {fs::remove_file(output)?;} continue; }
-            let src=wide(staged.as_os_str());
-            let dst=wide(output.as_os_str());
-            if unsafe{MoveFileExW(src.as_ptr(),dst.as_ptr(),0x1|0x8)}==0 {
-                return Err(io::Error::last_os_error().into());
-            }
+        // Preserve the preceding generation so an interrupted multi-file commit
+        // is recoverable without silently accepting a mixed snapshot set.
+        let rollback=self.folder.join("snapshot-rollback");
+        if rollback.exists() {return Err("Unresolved portable snapshot rollback directory".into());}
+        fs::create_dir(&rollback)?;
+        let mut manifest=Vec::new();
+        for (_,output) in &pending {
+            let name=output.file_name().ok_or("Invalid snapshot file")?;
+            let existed=output.exists();
+            if existed {fs::copy(output,rollback.join(name))?;}
+            manifest.push((output.clone(),existed));
         }
+        let commit = (|| -> Result<()> {
+            for (staged,output) in &pending {
+                if staged.as_os_str().is_empty() {
+                    if output.exists() {fs::remove_file(output)?;}
+                } else {
+                    let src=wide(staged.as_os_str());
+                    let dst=wide(output.as_os_str());
+                    if unsafe{MoveFileExW(src.as_ptr(),dst.as_ptr(),0x1|0x8)}==0 {
+                        return Err(io::Error::last_os_error().into());
+                    }
+                }
+            }
+            Ok(())
+        })();
+        if let Err(error)=commit {
+            // The rollback directory and journal remain if recovery fails.
+            for (output,existed) in &manifest {
+                if *existed {fs::copy(rollback.join(output.file_name().ok_or("Invalid snapshot name")?),output)?;}
+                else if output.exists() {fs::remove_file(output)?;}
+            }
+            fs::remove_dir_all(&rollback)?;
+            return Err(error);
+        }
+        fs::remove_dir_all(&rollback)?;
         fs::remove_file(&self.journal)?;
         Ok(())
     }
