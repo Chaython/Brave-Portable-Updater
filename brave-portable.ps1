@@ -49,8 +49,8 @@ foreach ($arg in @($BraveArgs)) {
     $forwarded += $arg
 }
 $argsToPass = @(
-    "--user-data-dir=`"$profileDir`""
-    "--disk-cache-dir=`"$cacheDir`""
+    "--user-data-dir=$profileDir"
+    "--disk-cache-dir=$cacheDir"
     '--no-default-browser-check'
     '--disable-background-mode'
 ) + $forwarded
@@ -69,7 +69,7 @@ Write-Host "Launching portable Brave: $braveExe"
 Write-Host "Profile: $profileDir"
 Write-Host 'Windows Brave registry and browser policies will not be modified.'
 $proc = Start-Process -FilePath $braveExe -WorkingDirectory $scriptDir -ArgumentList $argumentString -PassThru -ErrorAction Stop
-if ($NoWait) { return }
+if ($NoWait) { $proc.Dispose(); return }
 try {
     $proc.WaitForExit()
     $root = [IO.Path]::GetFullPath($appDir).TrimEnd([char]92) + [char]92
