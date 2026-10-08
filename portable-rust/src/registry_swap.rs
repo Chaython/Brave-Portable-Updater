@@ -132,6 +132,7 @@ pub fn recover(root:&Path)->Result<()> {
         }
     }
     if state.host_restored {return Err("Host registry was already restored; resolve portable snapshot rollback instead of overwriting live keys".into());}
+    return Err("Registry restore state cannot be proven after an interruption. Inspect current host keys and saved backups manually before any destructive recovery.".into());
     // Save the current live keys before restoring the older snapshot.
     let stamp=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_nanos();
     for entry in &state.keys {
