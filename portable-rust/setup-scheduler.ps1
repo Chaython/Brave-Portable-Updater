@@ -26,6 +26,17 @@ try { $sha = $algorithm.ComputeHash([Text.Encoding]::UTF8.GetBytes($resolvedRoot
 finally { $algorithm.Dispose() }
 $id = ([BitConverter]::ToString($sha) -replace '-', '').Substring(0,16)
 $name = "BravePortableRustUpdate-$id"
+# Delete orphaned Rust tasks only when their target executable no longer exists.
+Get-ScheduledTask -TaskName 'BravePortableRustUpdate-*' -ErrorAction SilentlyContinue | ForEach-Object {
+    $oldTask = $_
+    foreach ($oldAction in @($oldTask.Actions)) {
+        $oldExe = [string]$oldAction.Execute
+        if ($oldExe -and [IO.Path]::GetFileName($oldExe) -ieq 'BravePortable.exe' -and -not (Test-Path -LiteralPath $oldExe)) {
+            Unregister-ScheduledTask -TaskName $oldTask.TaskName -Confirm:$false -ErrorAction SilentlyContinue
+            break
+        }
+    }
+}
 if ($Remove -or $frequency -eq 'never' -or -not $settings.scheduled_updates) {
     Unregister-ScheduledTask -TaskName $name -Confirm:$false -ErrorAction SilentlyContinue
     Write-Host "Removed task $name (if present)."
