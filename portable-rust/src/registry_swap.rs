@@ -53,7 +53,7 @@ fn reg(args:&[&str])->Result<()>{
     if status.success(){Ok(())}else{Err(format!("reg.exe {:?} failed: {status}",args).into())}
 }
 fn exists(key:&str)->Result<bool>{
-    const HKCU:isize=0x80000001_u32 as isize;
+    const HKCU:isize=0x80000001_u32 as i32 as isize;
     const KEY_READ:u32=0x20019;
     let relative=key.strip_prefix("HKCU\\").ok_or("Expected HKCU registry key")?;
     let wide_key=wide(OsStr::new(relative));
