@@ -359,7 +359,7 @@ fn launch() -> Result<(), Box<dyn std::error::Error>> {
     }
     let config = settings(root)?;
     if root.join("Data").join("Registry").join("active-session.json").exists() {
-        return Err("Interrupted registry swap detected. Close Brave, inspect Data/Registry backups, and run BravePortable.exe --recover-registry before another launch.".into());
+        return Err("Unresolved registry session: inspect Data/Registry/active-session.json. If host_restored=true use --recover-snapshots; otherwise inspect live host registry and saved backups manually (automatic restore is unsafe).".into());
     }
     if config.registry_virtualization == "required" && !env::args_os().any(|arg| arg == "--update-only") {
         return Err("Full registry/group-policy virtualization is not implemented. Launch refused to protect host registry. Set registry_virtualization to off only if profile isolation is acceptable.".into());
@@ -369,7 +369,10 @@ fn launch() -> Result<(), Box<dyn std::error::Error>> {
     if !options.no_download && !options.force_update && config.check_on_launch && check_due(root, &config.update_frequency, &options.edition) {
         options.force_update = true;
     }
-    let update_lock = UpdateLock::acquire(root)?;
+    let update_lock = match UpdateLock::acquire(root) {
+        Ok(lock) => lock,
+        Err(error) => return Err(format!("Brave Portable is already preparing or updating this installation; try again after that operation finishes: {error}").into()),
+    };
     let browser = match ensure_browser(root, &options) {
         Ok(browser) => browser,
         Err(error) if !explicit_update && !options.update_only && !root.join("Data").join("Registry").join("active-session.json").exists() => {
