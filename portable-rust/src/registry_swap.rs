@@ -11,6 +11,7 @@ extern "system" {
     fn ReleaseMutex(handle:isize)->i32;
     fn CloseHandle(handle:isize)->i32;
     fn MoveFileExW(old:*const u16,new:*const u16,flags:u32)->i32;
+    fn GetCurrentProcessId()->u32;
 }
 const WAIT_OBJECT_0:u32=0; const WAIT_ABANDONED:u32=0x80; const WAIT_TIMEOUT:u32=0x102;
 fn wide(s:&OsStr)->Vec<u16>{s.encode_wide().chain(std::iter::once(0)).collect()}
@@ -18,7 +19,7 @@ struct Mutex(isize);
 impl Mutex {
     fn lock()->Result<Self>{
         // This named lock serializes participating sessions across folders in this user.
-        let username=env::var("USERNAME").unwrap_or_else(|_|"unknown".into());
+        let username=env::var("USERDOMAIN").unwrap_or_default() + "_" + &env::var("USERNAME").unwrap_or_else(|_|"unknown".into());
         let name=wide(OsStr::new(&format!("Local\\BravePortableRegistrySwap_{username}")));
         let handle=unsafe{CreateMutexW(ptr::null_mut(),0,name.as_ptr())};
         if handle==0{return Err(io::Error::last_os_error().into());}
@@ -46,7 +47,7 @@ fn exists(key:&str)->Result<bool>{
     let status=Command::new("reg.exe").args(["query",key]).output()?;
     match status.status.code(){
         Some(0)=>Ok(true),
-        Some(1)=>Ok(false),
+        Some(1) if String::from_utf8_lossy(&status.stderr).trim().is_empty() && String::from_utf8_lossy(&status.stdout).to_ascii_lowercase().contains("unable to find") => Ok(false),
         _=>Err(format!("Could not query registry key {key}: {}",String::from_utf8_lossy(&status.stderr)).into()),
     }
 }
@@ -80,7 +81,9 @@ fn ensure_no_brave()->Result<()>{
     Ok(())
 }
 pub fn wait_for_brave_exit()->Result<()> {
+    let started=std::time::Instant::now();
     loop {
+        if started.elapsed()>Duration::from_secs(6*60*60) {return Err("Timed out waiting for Brave to exit; registry remains swapped for manual recovery".into());}
         match ensure_no_brave() {
             Ok(()) => return Ok(()),
             Err(error) if error.to_string() == "Close all Brave processes before registry-swapping mode" => {
@@ -94,6 +97,7 @@ pub struct Session {folder:PathBuf,journal:PathBuf,state:State,_lock:Mutex}
 impl Session {
     pub fn start(root:&Path,profile:&Path,cache:&Path)->Result<Self>{
         let lock=Mutex::lock()?;
+        // Avoid modifying host keys when a prior portable session is unfinished.
         ensure_no_brave()?;
         let folder=root.join("Data").join("Registry");
         fs::create_dir_all(&folder)?;
