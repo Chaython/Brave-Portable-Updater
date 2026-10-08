@@ -44,7 +44,7 @@ impl Drop for Mutex {fn drop(&mut self){unsafe{ReleaseMutex(self.0);CloseHandle(
 const REGISTRY:&str=r"HKCU\Software\BraveSoftware";
 const POLICY:&str=r"HKCU\Software\Policies\BraveSoftware\Brave";
 #[derive(serde::Serialize,serde::Deserialize)]
-struct State {keys:Vec<KeyState>}
+struct State {keys:Vec<KeyState>, #[serde(default)] host_restored:bool}
 #[derive(serde::Serialize,serde::Deserialize)]
 struct KeyState {key:String, existed:bool, backup:String, portable:String}
 
@@ -131,6 +131,7 @@ pub fn recover(root:&Path)->Result<()> {
             if !canonical_backup.starts_with(&canonical_folder) {return Err("Recovery backup escapes registry folder".into());}
         }
     }
+    if state.host_restored {return Err("Host registry was already restored; resolve portable snapshot rollback instead of overwriting live keys".into());}
     // Save the current live keys before restoring the older snapshot.
     let stamp=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_nanos();
     for entry in &state.keys {
@@ -163,7 +164,7 @@ impl Session {
         if journal.exists(){
             return Err(format!("Interrupted registry swap: {journal:?}. Do not launch until original keys are recovered using the pre-session backups.").into());
         }
-        let mut state=State{keys:Vec::new()};
+        let mut state=State{keys:Vec::new(),host_restored:false};
         let suffix = format!("{}-{}",std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_nanos());
         for (key,backup,portable) in [
             (REGISTRY,"host-brave.reg","portable-brave.reg"),
@@ -234,6 +235,8 @@ impl Session {
         }
         let restored=self.restore_host();
         restored?;
+        let state=State{keys:self.state.keys.iter().map(|k| KeyState{key:k.key.clone(),existed:k.existed,backup:k.backup.clone(),portable:k.portable.clone()}).collect(),host_restored:true};
+        fs::write(&self.journal,serde_json::to_vec_pretty(&state)?)?;
         if let Some(error)=capture_error {return Err(format!("Portable registry capture failed; previous snapshots preserved: {error}").into());}
         // Preserve the preceding generation so an interrupted multi-file commit
         // is recoverable without silently accepting a mixed snapshot set.
