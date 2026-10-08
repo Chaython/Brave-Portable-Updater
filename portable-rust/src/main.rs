@@ -347,7 +347,7 @@ fn launch() -> Result<(), Box<dyn std::error::Error>> {
     let executable = env::current_exe()?;
     let root = executable.parent().ok_or("Launcher has no parent directory")?;
     if env::args_os().skip(1).any(|argument| argument == "--recover-registry") {
-        if env::args_os().count() != 2 {return Err("--recover-registry cannot be combined with other arguments".into());}
+        if env::args_os().count() != 3 || !env::args_os().any(|argument| argument == "--confirm-restore") {return Err("Recovery requires --recover-registry --confirm-restore after reviewing live registry and backups".into());}
         registry_swap::recover(root)?;
         append_log(root, "Explicit registry recovery completed");
         return Ok(());
