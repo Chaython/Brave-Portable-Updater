@@ -219,7 +219,7 @@ impl Session {
             let staged=output.with_extension("pending.reg");
             match exists(&key.key) {
                 Ok(true)=>{if let Err(e)=export(&key.key,&staged){capture_error=Some(e.to_string());}else{pending.push((staged,output));}},
-                Ok(false)=>{ /* keep last known portable snapshot until next valid session */ },
+                Ok(false)=>{ pending.push((PathBuf::new(),output)); },
                 Err(e)=>capture_error=Some(e.to_string()),
             }
         }
@@ -227,6 +227,7 @@ impl Session {
         restored?;
         if let Some(error)=capture_error {return Err(format!("Portable registry capture failed; previous snapshots preserved: {error}").into());}
         for (staged,output) in pending {
+            if staged.as_os_str().is_empty() { if output.exists() {fs::remove_file(output)?;} continue; }
             let src=wide(staged.as_os_str());
             let dst=wide(output.as_os_str());
             if unsafe{MoveFileExW(src.as_ptr(),dst.as_ptr(),0x1|0x8)}==0 {
