@@ -1,180 +1,51 @@
-# Brave-Portable-Updater
+# Brave Portable Updater
 
-A PowerShell-based utility to download and extract the latest Brave Portable edition for Windows — with two portable modes, registry management, and group-policy hijacking.
+Update and launch Brave Stable, Beta, or Nightly without affecting unrelated Brave processes.
 
----
+## Modes
 
-## Two modes, two folders
+- **Root / standalone:** `download_brave.ps1` downloads the browser and `brave-portable.ps1` launches it using `Data/profile`, `Data/cache`, and redirected APPDATA/LOCALAPPDATA.
+- **portapps/**: Updater scripts for an existing portapps.io `brave-portable.exe` wrapper. The wrapper handles its own portability.
 
-| Mode | Folder | When to use | How it stays portable |
-| --- | --- | --- | --- |
-| **A — portapps drop-in** | `portapps/` | You already have a portapps.io Brave Portable install with `brave-portable.exe`. | The portapps wrapper redirects AppData/registry. |
-| **B — self-contained** | repository root | No portapps wrapper. Just these scripts. | `brave-portable.ps1` redirects env vars, registry, and injects group policies. |
+**Important:** The standalone launcher no longer swaps, deletes, exports, or imports the Windows Brave registry, and does not inject group policies. This removes a class of registry corruption and crash-recovery hazards. It is profile isolation, **not a full Windows sandbox**: Brave or Windows may still write other OS-level integration data. Avoid making portable Brave your default browser if you want to minimize this.
 
-Both folders are **self-contained** — each has its own copy of `download_brave.ps1`, `update.bat`, and `run_at_boot.ps1`, so you can use either one on its own.
+Older `Data/registry/*.reg` files from previous versions are left untouched for manual recovery. Back them up before removing them. `-NoRegistry` and `-NoPolicy` are still accepted for compatibility, but registry and policy mutation are now always disabled.
 
-### Mode A — portapps/ (drop-in)
-
-Copy the `portapps/` folder next to your existing `brave-portable.exe`:
-
-```bat
-portapps\update.bat beta                 :: update beta
-portapps\update_then_run_brave.bat       :: update + launch (nightly)
-portapps\update_then_run_brave.bat stable:: update + launch (stable)
-```
-
-### Mode B — self-contained (root)
-
-```bat
-update.bat beta                          :: update beta
-update_then_run_portable.bat             :: update + launch (nightly)
-update_then_run_portable.bat stable      :: update + launch (stable)
-```
-
-Launch directly without updating:
+## Update
 
 ```powershell
-.\brave-portable.ps1                     :: portable launch
-.\brave-portable.ps1 --incognito         :: portable + incognito
-.\brave-portable.ps1 https://example.com :: portable + open URL
-```
-
----
-
-## How the self-contained launcher keeps Brave portable
-
-`brave-portable.ps1` uses **four layers** of redirection so Brave never writes to your real user profile or leaves registry keys behind:
-
-### Layer 1 — Environment variables
-`APPDATA` and `LOCALAPPDATA` are redirected to `Data\AppData\Roaming` and `Data\AppData\Local`. Brave and every child process it spawns inherit these, so support files land in `Data\`.
-
-### Layer 2 — Command-line flags
-`--user-data-dir=Data\profile`, `--disk-cache-dir=Data\cache`, `--no-default-browser-check`, `--disable-background-mode`.
-
-### Layer 3 — Group policy hijacking
-Brave (like Chromium) reads policies from `HKCU\Software\Policies\BraveSoftware\Brave`. We inject these before launch and remove them after exit:
-
-| Policy | Value | Effect |
-| --- | --- | --- |
-| `UserDataDir` | `Data\profile` | Forces the profile directory even for helper processes. |
-| `DiskCacheDir` | `Data\cache` | Forces the cache directory. |
-| `BackgroundModeEnabled` | `0` | No background process after the window closes. |
-| `DefaultBrowserSettingEnabled` | `0` | Never tries to register as default browser. |
-| `SyncDisabled` | `1` | No account sync — keeps data local. |
-
-### Layer 4 — Registry backup / restore / cleanup
-Brave writes to `HKCU\Software\BraveSoftware\*` (window placement, metrics, version beacon…). To keep that state portable **and** not clobber a real Brave install:
-
-**On launch:**
-1. *(once)* If a real Brave install's registry exists, back it up to `Data\registry\real-install-backup.reg` as a safety copy.
-2. Snapshot the current live `HKCU\Software\BraveSoftware` → `pre-session.reg`.
-3. Delete the live key (clean slate).
-4. Import `Data\registry\brave-portable.reg` (portable state from last session, if any).
-
-**After Brave exits:**
-5. Export the live `HKCU\Software\BraveSoftware` → `brave-portable.reg` (persist this session).
-6. Delete the live key.
-7. Delete the injected policy keys.
-8. Clean up stray default-browser / app-paths keys Brave may have created.
-9. Re-import `pre-session.reg` (restoring the pre-launch state — real install, or nothing).
-
-**Net result:** while Brave runs it sees its own portable registry; after it closes, the live registry is exactly as it was before.
-
-> The script **waits for Brave to exit** so cleanup can run. Use `-NoWait` to fire-and-forget (cleanup is skipped, with a warning). Use `-NoRegistry` or `-NoPolicy` to disable individual layers.
-
----
-
-## File reference
-
-### Root (self-contained mode)
-
-| File | Purpose |
-| --- | --- |
-| `download_brave.ps1` | Updater — edition targeting, version checking, downloading. Accepts `-Edition`, `-OutDir`, `-Force`. |
-| `brave-portable.ps1` | Portable sandbox launcher — env + flags + group policy + registry management. Accepts `-NoRegistry`, `-NoPolicy`, `-NoWait`. |
-| `update.bat` | Update only. First arg is the edition. |
-| `update_then_run_portable.bat` | Update + launch via `brave-portable.ps1`. |
-| `run_at_boot.ps1` | Register/remove a boot scheduled task. Accepts `-Edition` and `-Remove`. |
-
-### portapps/ (Mode A drop-in)
-
-| File | Purpose |
-| --- | --- |
-| `download_brave.ps1` | Updater (copy of root). |
-| `update.bat` | Update only (copy of root). |
-| `update_then_run_brave.bat` | Update + launch via `brave-portable.exe` (portapps wrapper). |
-| `run_at_boot.ps1` | Boot task (copy of root). |
-
-> All launchers forward the edition to `download_brave.ps1`. You no longer have to edit the default inside the script to use beta or stable.
-
----
-
-## Folder layout (self-contained mode)
-
-```
-Brave-Portable-Updater/
-├── download_brave.ps1
-├── brave-portable.ps1
-├── update.bat
-├── update_then_run_portable.bat
-├── run_at_boot.ps1
-├── portapps/                         <- Mode A drop-in (self-contained)
-│   ├── download_brave.ps1
-│   ├── update.bat
-│   ├── update_then_run_brave.bat
-│   ├── run_at_boot.ps1
-│   └── README.md
-├── app/                              <- created by download_brave.ps1
-│   └── brave-vX.Y.Z-win32-x64/
-│       └── brave.exe
-└── Data/                             <- created by brave-portable.ps1
-    ├── profile/                      <- user data dir
-    ├── cache/                        <- disk cache
-    ├── AppData/
-    │   ├── Roaming/                  <- redirected %APPDATA%
-    │   └── Local/                    <- redirected %LOCALAPPDATA%
-    └── registry/
-        ├── brave-portable.reg        <- portable registry state (per-session)
-        ├── real-install-backup.reg   <- one-time safety backup of a real install
-        └── pre-session.reg           <- temp (deleted after restore)
-```
-
----
-
-## Usage
-
-### Default (Nightly edition)
-
-```powershell
-.\download_brave.ps1
-```
-
-### Target a specific edition
-
-```powershell
-.\download_brave.ps1 -Edition beta
+.\download_brave.ps1                    # Nightly, the default
 .\download_brave.ps1 -Edition stable
+.\download_brave.ps1 -Edition beta -Force
 ```
 
-### Force a re-download
-
-```powershell
-.\download_brave.ps1 -Edition stable -Force
+```bat
+update.bat stable
+update_then_run_portable.bat stable
 ```
 
-### Autorun at Boot
+Downloaded archives are extracted into a staging folder and validated before switching `app/`. Existing installations are moved to a backup directory during replacement. The updater **never kills Brave**; close portable Brave before updating. Any older `.app-backup-*` directories should be reviewed before deletion. The updater uses channel-aware version markers and can page through GitHub releases.
+
+## Launch (standalone)
 
 ```powershell
-.\run_at_boot.ps1                 :: nightly
-.\run_at_boot.ps1 -Edition beta
+.\brave-portable.ps1
+.\brave-portable.ps1 --incognito
+.\brave-portable.ps1 https://example.com
+.\brave-portable.ps1 -NoWait
+```
+
+The launcher waits for the browser and its visible portable `brave.exe` child processes unless `-NoWait` is used. It rejects custom `--user-data-dir` and `--disk-cache-dir` overrides.
+
+## Scheduled update
+
+```powershell
 .\run_at_boot.ps1 -Edition stable
-.\run_at_boot.ps1 -Remove         :: uninstall the task
+.\run_at_boot.ps1 -Remove
 ```
 
-Task output is appended to `brave-update.log` next to the script.
+Despite the historical filename, this creates a **logon-triggered** Windows scheduled task under the current interactive user, not a boot-time SYSTEM task. Output is appended to `brave-update.log`.
 
----
+## Requirements and limitations
 
-## Compatibility
-
-Designed for Windows OS. Requires PowerShell 5.1+ (PowerShell 7+ also works). `reg.exe` (standard Windows binary) is used for registry export/import.
+Windows PowerShell 5.1+ on Windows x64, an internet connection to GitHub releases, and enough free disk space for both staged and old Brave binaries. Registry isolation is deliberately not provided by the standalone launcher. A Windows integration test is recommended before relying on unattended updates.
