@@ -57,7 +57,7 @@ On first run, the launcher creates `Data/settings.json` beside the EXE:
 - `update_frequency`: `never`, `launch`, `daily`, or `weekly`. The launcher remembers the last successful GitHub release check in `Data/last-update-check`; `daily` and `weekly` are minimum intervals, not background timers.
 - `check_on_launch`: whether ordinary launches perform due update checks. It does not disable first-time installation if Brave is missing.
 - `scheduled_updates`: opt-in to an external Windows Task Scheduler task.
-- `registry_virtualization`: `off` (current profile-only behavior) or `required`. `required` currently **refuses to launch**, because a genuine all-process registry and policy interception engine does not yet exist. It does not silently fall back to writes to the Windows registry.
+- `registry_virtualization`: `off` (profile-only), `swap` (temporary PowerShell-style HKCU Brave and policy capture), or `required` (refuses launch until full virtualization is implemented). `swap` is **not virtualization**: it alters live Windows registry keys during a session.
 
 To register/update the scheduler after placing `setup-scheduler.ps1` beside the EXE:
 
@@ -68,7 +68,7 @@ To register/update the scheduler after placing `setup-scheduler.ps1` beside the 
 
 The scheduler runs `BravePortable.exe --update-only`, without opening a browser. The scheduler script requires no elevation in normal per-user configurations but Windows policy may limit registration. Change the frequency in JSON and **rerun setup-scheduler.ps1** to update the task. The current scheduler runs daily or weekly at 12:00 local time when the user is signed in. `launch` and `never` install no task. The JSON does not automatically register a task by itself.
 
-Other supported flags: `--update`, `--force` / `-Force`, `--edition stable|beta|nightly` / `-Edition`, `--no-download`, `--update-only`, and `--` for browser arguments. These are not complete equivalents of the PowerShell scripts: `-OutDir`, `-NoRegistry`, `-NoPolicy`, and `-NoWait` are not implemented in Rust. The Rust launcher continues to have **no registry/group-policy virtualization**, and its settings are separate from other launcher versions.
+Other supported flags: `--update`, `--force` / `-Force`, `--edition stable|beta|nightly` / `-Edition`, `--no-download`, `--update-only`, and `--` for browser arguments. These are not complete equivalents of the PowerShell scripts: `-OutDir`, `-NoRegistry`, `-NoPolicy`, and `-NoWait` are not implemented in Rust. The Rust launcher now supports **opt-in temporary registry/group-policy swapping**, but still does not provide virtualization. Its settings are separate from other launcher versions.
 
 **Updates are blocked when any Brave process is running**, including unrelated installed Brave instances, to avoid replacing in-use executables. Close Brave and retry if an update fails. An interrupted update may leave `.app-backup-*` or `.app-staging-*` directories; do not delete them until you've confirmed your existing App works.
 
@@ -78,10 +78,26 @@ A portable Rust EXE alone does not redirect Windows registry operations of anoth
 
 ## Registry limitations — important
 
-**This release does not virtualize the registry or group policy.** It deliberately does not export, delete, import, or mutate the system Brave registry or policy branches. Chrome/Brave can still perform Windows integration writes through operating-system APIs. `APPDATA` and `LOCALAPPDATA` environment redirection is not a security boundary.
+**This release does not virtualize the registry or group policy.** With `registry_virtualization` set to `off`, the launcher does not deliberately change the registry. With `swap`, it exports the existing HKCU BraveSoftware and HKCU policy keys, replaces them with portable `.reg` snapshots, launches Brave, captures the changed portable state, and restores the original keys on exit. This modifies real Windows registry keys while Brave is running. `APPDATA` and `LOCALAPPDATA` environment redirection is not a security boundary.
 
-A future registry virtualization mode must intercept relevant registry APIs across all browser processes, provide an isolated persistent namespace, and fail closed if the isolation is unavailable. Merely configuring `RegOverridePredefKey` in the parent launcher does not cover spawned Chromium subprocesses. The legacy PowerShell launcher still provides registry snapshot capture, with its documented risks.
+A future registry virtualization mode must intercept relevant registry APIs across all browser processes, provide an isolated persistent namespace, and fail closed if the isolation is unavailable. Merely configuring `RegOverridePredefKey` in the parent launcher does not cover spawned Chromium subprocesses. The legacy PowerShell launcher also provides registry snapshot capture, with similar risks.
 
 ## Compatibility
 
 Windows 10/11 x64, Rust MSVC release build. Do not use this launcher if complete registry isolation is a requirement until a genuine tested virtualization backend exists.
+
+
+## Temporary registry + group-policy capture (opt-in)
+
+Set `"registry_virtualization": "swap"` in `Data/settings.json` to enable the placeholder capture mode. Use `"off"` for the normal Rust profile-only mode, or `"required"` to refuse launching unless actual virtualization exists.
+
+In swap mode, the Rust launcher:
+1. Refuses startup while **any Brave process** is detected and obtains a named process mutex.
+2. Exports existing `HKCU\Software\BraveSoftware` and `HKCU\Software\Policies\BraveSoftware\Brave` to timestamped `Data/Registry/*-host-*.reg` backups.
+3. Writes `Data/Registry/active-session.json` **before** deleting/importing live keys. The session imports `portable-brave.reg` and `portable-policy.reg`, if available.
+4. Launches Brave with portable profile/cache paths, waits for the original process and **all Brave processes** to exit, captures updated portable registry state, and restores the original host keys.
+5. Removes the journal only after successfully restoring the host registry.
+
+If Brave or the launcher crashes, `active-session.json` remains as a recovery warning and future swap launches refuse to proceed. **Recovery is manual**: close Brave, inspect that journal and the corresponding host snapshots, and restore only the original keys when safe. Do not delete the journal or old snapshots until recovery is complete.
+
+This mode is **experimental and can cause data loss**. It temporarily replaces the *whole* user BraveSoftware branch and its HKCU Brave policy subtree. It does not isolate HKLM policy, native registry access, or third-party Windows integrations. The tasklist-based process check can miss races, access-denied processes or process names that differ. Unexpected termination, simultaneous regular Brave startup, or policy permissions can prevent restoration. Back up the Windows registry before trying it. It is not appropriate where other Brave instances may run concurrently. It is a placeholder until genuine registry virtualization is implemented.
