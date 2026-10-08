@@ -32,23 +32,41 @@ try {
     catch [System.Threading.AbandonedMutexException] { $mutexAcquired = $true }
     if (-not $mutexAcquired) { throw "Another Brave Portable update is running for '$OutDir'." }
 
-    $keyword = @{ nightly = 'Nightly'; beta = 'Beta'; stable = 'Release' }[$Edition]
     $release = $null
     $asset = $null
+    $channelPattern = switch ($Edition) {
+        'stable'  { '^Release\s+v' }
+        'beta'    { '^Beta\s+v' }
+        'nightly' { '^Nightly\s+v' }
+    }
     for ($page = 1; $page -le 10 -and -not $asset; $page++) {
         $url = "https://api.github.com/repos/brave/brave-browser/releases?per_page=100&page=$page"
-        $releases = @(Invoke-RestMethod -Uri $url -Headers @{ 'User-Agent' = 'Brave-Portable-Updater'; 'Accept' = 'application/vnd.github+json' } -ErrorAction Stop)
+        $response = Invoke-RestMethod -Uri $url -Headers @{
+            'User-Agent' = 'Brave-Portable-Updater'
+            'Accept' = 'application/vnd.github+json'
+        } -ErrorAction Stop
+        # Invoke-RestMethod's array behavior differs from ordinary pipeline
+        # enumeration. Explicitly normalize the top-level response.
+        $releases = @()
+        foreach ($item in $response) { $releases += $item }
+        Write-Host "Release page $page : $($releases.Count) entries"
         if ($releases.Count -eq 0) { break }
         foreach ($candidate in $releases) {
-            if ($candidate.name -notmatch "(?i)\b$keyword\b") { continue }
-            # Stable must not select a prerelease or release candidate.
-            if ($Edition -eq 'stable' -and ($candidate.prerelease -or $candidate.name -match '(?i)release candidate|\bRC\b')) { continue }
-            $found = @($candidate.assets | Where-Object { $_.name -match '^brave-v.*-win32-x64\.zip$' }) | Select-Object -First 1
-            if ($found) { $release = $candidate; $asset = $found; break }
+            if ([string]$candidate.name -notmatch $channelPattern) { continue }
+            if ($Edition -eq 'stable' -and ($candidate.prerelease -or
+                    [string]$candidate.name -match '(?i)release candidate|\bRC\b')) { continue }
+            foreach ($candidateAsset in @($candidate.assets)) {
+                if ([string]$candidateAsset.name -match '^brave-v[\d.]+-win32-x64\.zip$') {
+                    $release = $candidate
+                    $asset = $candidateAsset
+                    break
+                }
+            }
+            if ($asset) { break }
         }
         if ($releases.Count -lt 100) { break }
     }
-    if (-not $asset) { throw "No $Edition Windows x64 zip asset found in up to 1000 recent releases." }
+    if (-not $asset) { throw "No $Edition Windows x64 ZIP asset found in up to 1000 recent Brave releases." }
     $version = $release.tag_name -replace '^v', ''
     # Restore an interrupted swap BEFORE deciding that a version is current.
     # Otherwise a missing app directory could be mistaken for a completed update.
