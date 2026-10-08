@@ -1,6 +1,6 @@
 # Brave Portable — standalone Rust launcher
 
-This is the installation-free Rust implementation, separate from `msix-rust/` and from the legacy PowerShell launcher.
+This is the installation-free Rust implementation, separate from the legacy PowerShell launcher. The MSIX experiment has been removed.
 
 ## Run
 
