@@ -58,25 +58,78 @@ struct ReleaseAsset {
     digest: Option<String>,
     size: u64,
 }
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+struct Settings {
+    edition: String,
+    update_frequency: String,
+    check_on_launch: bool,
+    scheduled_updates: bool,
+}
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            edition: "stable".into(),
+            update_frequency: "daily".into(),
+            check_on_launch: true,
+            scheduled_updates: false,
+        }
+    }
+}
+fn settings(root: &Path) -> Result<Settings, Box<dyn std::error::Error>> {
+    let file = root.join("Data").join("settings.json");
+    if let Some(parent) = file.parent() { fs::create_dir_all(parent)?; }
+    if !file.exists() {
+        let default = Settings::default();
+        fs::write(&file, serde_json::to_vec_pretty(&default)?)?;
+        return Ok(default);
+    }
+    let parsed: Settings = serde_json::from_slice(&fs::read(&file)?)?;
+    if !matches!(parsed.edition.as_str(), "stable"|"beta"|"nightly") {
+        return Err("Data/settings.json: edition must be stable, beta or nightly".into());
+    }
+    if !matches!(parsed.update_frequency.as_str(), "never"|"launch"|"daily"|"weekly") {
+        return Err("Data/settings.json: update_frequency must be never, launch, daily or weekly".into());
+    }
+    Ok(parsed)
+}
+fn check_due(root: &Path, frequency: &str) -> bool {
+    if frequency == "never" { return false; }
+    if frequency == "launch" { return true; }
+    let file = root.join("Data").join("last-update-check");
+    let Ok(stamp) = fs::read_to_string(file) else { return true };
+    let Ok(last) = stamp.trim().parse::<u64>() else { return true };
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|v| v.as_secs()).unwrap_or(0);
+    now.saturating_sub(last) >= if frequency == "weekly" { 7*86400 } else { 86400 }
+}
+fn record_check(root: &Path) {
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|v| v.as_secs()).unwrap_or(0);
+    let _ = fs::write(root.join("Data").join("last-update-check"), now.to_string());
+}
+
 struct DownloadOptions {
     edition: String,
     force_update: bool,
     no_download: bool,
+    update_only: bool,
     passthrough: Vec<OsString>,
 }
-fn parse_options() -> Result<DownloadOptions, Box<dyn std::error::Error>> {
-    let mut edition = "stable".to_owned();
+fn parse_options(config: &Settings) -> Result<DownloadOptions, Box<dyn std::error::Error>> {
+    let mut edition = config.edition.clone();
     let mut force_update = false;
     let mut no_download = false;
+    let mut update_only = false;
     let mut passthrough = Vec::new();
     let mut args = env::args_os().skip(1);
     let mut forwarding = false;
     while let Some(arg) = args.next() {
         let value = arg.to_string_lossy();
         if !forwarding && value == "--" { forwarding = true; continue; }
-        if !forwarding && value == "--update" { force_update = true; continue; }
+        if !forwarding && matches!(value.as_ref(), "--update" | "--force" | "-Force") { force_update = true; continue; }
+        if !forwarding && value == "--update-only" { update_only = true; force_update = true; continue; }
         if !forwarding && value == "--no-download" { no_download = true; continue; }
-        if !forwarding && value == "--edition" {
+        if !forwarding && (value == "--edition" || value == "-Edition") {
             edition = args.next().ok_or("--edition requires stable, beta or nightly")?
                 .to_string_lossy().to_ascii_lowercase();
             continue;
@@ -91,7 +144,7 @@ fn parse_options() -> Result<DownloadOptions, Box<dyn std::error::Error>> {
         return Err("Edition must be stable, beta or nightly".into());
     }
     if force_update && no_download { return Err("--update conflicts with --no-download".into()); }
-    Ok(DownloadOptions { edition, force_update, no_download, passthrough })
+    Ok(DownloadOptions { edition, force_update, no_download, update_only, passthrough })
 }
 
 fn release_asset(client: &reqwest::blocking::Client, edition: &str)
@@ -168,7 +221,20 @@ fn ensure_browser(root: &Path, options: &DownloadOptions) -> Result<PathBuf, Box
         .user_agent("Brave-Portable-Rust/0.1")
         .timeout(std::time::Duration::from_secs(900))
         .build()?;
-    let (version, asset) = release_asset(&client, &options.edition)?;
+    let (version, asset) = match release_asset(&client, &options.edition) {
+        Ok(found) => found,
+        Err(error) if existing.is_some() && !options.update_only => {
+            append_log(root, &format!("Release lookup failed; launching installed Brave: {error}"));
+            return Ok(existing.unwrap());
+        }
+        Err(error) => return Err(error),
+    };
+    record_check(root);
+    let marker = fs::read_to_string(app.join(".brave-portable-version")).unwrap_or_default();
+    if existing.is_some() && marker.trim() == format!("{}|{}", options.edition, version) {
+        append_log(root, "Brave release is already current");
+        return Ok(existing.unwrap());
+    }
     if asset.size == 0 || asset.size > 2_000_000_000 {
         return Err("Unreasonable Brave download size".into());
     }
@@ -218,8 +284,13 @@ fn launch() -> Result<(), Box<dyn std::error::Error>> {
     // The launcher is movable: all paths are resolved relative to this executable.
     let executable = env::current_exe()?;
     let root = executable.parent().ok_or("Launcher has no parent directory")?;
-    let options = parse_options()?;
+    let config = settings(root)?;
+    let mut options = parse_options(&config)?;
+    if !options.no_download && !options.force_update && config.check_on_launch && check_due(root, &config.update_frequency) {
+        options.force_update = true;
+    }
     let browser = ensure_browser(root, &options)?;
+    if options.update_only { return Ok(()); }
     append_log(root, &format!("Launching browser at {}", browser.display()));
     let data = root.join("Data");
     let profile = data.join("Profile");
