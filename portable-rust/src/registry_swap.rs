@@ -152,6 +152,26 @@ pub fn recover(root:&Path)->Result<()> {
     fs::remove_file(&journal)?;
     Ok(())
 }
+pub fn recover_snapshots(root:&Path)->Result<()> {
+    let _lock=Mutex::lock()?;
+    ensure_no_brave()?;
+    let folder=root.join("Data").join("Registry");
+    let journal=folder.join("active-session.json");
+    let state:State=serde_json::from_slice(&fs::read(&journal)?)?;
+    if !state.host_restored {return Err("Host registry still requires recovery first".into());}
+    let rollback=folder.join("snapshot-rollback");
+    if rollback.is_dir() {
+        for name in ["portable-brave.reg","portable-policy.reg"] {
+            let old=rollback.join(name);
+            if old.exists() {fs::copy(old,folder.join(name))?;}
+        }
+        fs::remove_dir_all(&rollback)?;
+    } else if state.keys.iter().any(|k|folder.join(&k.portable).with_extension("pending.reg").exists()) {
+        return Err("Pending snapshots require manual inspection before clearing journal".into());
+    }
+    fs::remove_file(&journal)?;
+    Ok(())
+}
 pub struct Session {folder:PathBuf,journal:PathBuf,state:State,_lock:Mutex}
 impl Session {
     pub fn start(root:&Path,profile:&Path,cache:&Path,include_registry:bool,include_policy:bool)->Result<Self>{
