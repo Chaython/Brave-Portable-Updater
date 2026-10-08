@@ -1,5 +1,25 @@
 #![cfg(windows)]
-use std::{env, ffi::OsString, fs, io, path::{Path, PathBuf}, process::{Command, ExitCode}};
+use std::{env, ffi::{OsString, OsStr}, fs, io, path::{Path, PathBuf}, process::{Command, ExitCode}, time::{SystemTime, UNIX_EPOCH}};
+use std::os::windows::ffi::OsStrExt;
+use std::io::Write;
+
+#[link(name = "user32")]
+extern "system" { fn MessageBoxW(hwnd: isize, text: *const u16, caption: *const u16, kind: u32) -> i32; }
+
+fn wide(value: &OsStr) -> Vec<u16> { value.encode_wide().chain(std::iter::once(0)).collect() }
+fn notify_error(message: &str) {
+    let body = wide(OsStr::new(message));
+    let title = wide(OsStr::new("Brave Portable - Launch failed"));
+    unsafe { MessageBoxW(0, body.as_ptr(), title.as_ptr(), 0x10); }
+}
+fn append_log(root: &Path, message: &str) {
+    let folder = root.join("Data").join("Logs");
+    if fs::create_dir_all(&folder).is_err() { return; }
+    if let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(folder.join("launcher.log")) {
+        let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let _ = writeln!(file, "[{stamp}] {message}");
+    }
+}
 
 fn browser_in(directory: &Path) -> io::Result<PathBuf> {
     let mut stack = vec![directory.to_path_buf()];
@@ -26,7 +46,8 @@ fn launch() -> Result<(), Box<dyn std::error::Error>> {
     // The launcher is movable: all paths are resolved relative to this executable.
     let executable = env::current_exe()?;
     let root = executable.parent().ok_or("Launcher has no parent directory")?;
-    let browser = browser_in(&root.join("App"))?;
+    let browser = browser_in(&root.join("App")).map_err(|e| format!("Cannot locate Brave in {}: {e}. Place BravePortable.exe beside an App folder containing the extracted Brave files.", root.display()))?;
+    append_log(root, &format!("Launching browser at {}", browser.display()));
     let data = root.join("Data");
     let profile = data.join("Profile");
     let cache = data.join("Cache");
@@ -56,7 +77,9 @@ fn launch() -> Result<(), Box<dyn std::error::Error>> {
         .arg("--disable-background-mode")
         .args(passthrough)
         .spawn()?;
+    append_log(root, &format!("Brave started with PID {}", child.id()));
     let status = child.wait()?;
+    append_log(root, &format!("Brave initial process exited: {status}"));
     if !status.success() {
         return Err(format!("Brave exited with status {status}").into());
     }
@@ -67,7 +90,12 @@ fn main() -> ExitCode {
     match launch() {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("Brave Portable: {error}");
+            let message = format!("Brave Portable: {error}");
+            eprintln!("{message}");
+            if let Ok(exe) = env::current_exe() {
+                if let Some(root) = exe.parent() { append_log(root, &message); }
+            }
+            notify_error(&message);
             ExitCode::FAILURE
         }
     }
