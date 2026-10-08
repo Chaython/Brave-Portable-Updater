@@ -12,6 +12,11 @@ extern "system" {
     fn CloseHandle(handle:isize)->i32;
     fn MoveFileExW(old:*const u16,new:*const u16,flags:u32)->i32;
 }
+#[link(name="advapi32")]
+extern "system" {
+    fn RegOpenKeyExW(key:isize,subkey:*const u16,options:u32,access:u32,result:*mut isize)->i32;
+    fn RegCloseKey(key:isize)->i32;
+}
 const WAIT_OBJECT_0:u32=0; const WAIT_ABANDONED:u32=0x80; const WAIT_TIMEOUT:u32=0x102;
 fn wide(s:&OsStr)->Vec<u16>{s.encode_wide().chain(std::iter::once(0)).collect()}
 struct Mutex(isize);
@@ -48,13 +53,19 @@ fn reg(args:&[&str])->Result<()>{
     if status.success(){Ok(())}else{Err(format!("reg.exe {:?} failed: {status}",args).into())}
 }
 fn exists(key:&str)->Result<bool>{
-    let status=Command::new("reg.exe").args(["query",key]).output()?;
-    match status.status.code(){
-        Some(0)=>Ok(true),
-        Some(1) if { let message=format!("{} {}",String::from_utf8_lossy(&status.stdout),String::from_utf8_lossy(&status.stderr)).to_ascii_lowercase(); message.contains("unable to find") || message.contains("cannot find") } => Ok(false),
-        _=>Err(format!("Could not query registry key {key}: {}",String::from_utf8_lossy(&status.stderr)).into()),
+    const HKCU:isize=0x80000001_u32 as isize;
+    const KEY_READ:u32=0x20019;
+    let relative=key.strip_prefix("HKCU\\").ok_or("Expected HKCU registry key")?;
+    let wide_key=wide(OsStr::new(relative));
+    let mut handle=0isize;
+    let status=unsafe{RegOpenKeyExW(HKCU,wide_key.as_ptr(),0,KEY_READ,&mut handle)};
+    match status {
+        0=>{unsafe{RegCloseKey(handle);};Ok(true)},
+        2=>Ok(false), // ERROR_FILE_NOT_FOUND; no localized text parsing
+        code=>Err(io::Error::from_raw_os_error(code).into()),
     }
 }
+
 fn export(key:&str,path:&Path)->Result<()>{
     let destination=path.to_str().ok_or("Registry backup path isn't valid Unicode")?;
     let tmp=path.with_extension("tmp.reg");
