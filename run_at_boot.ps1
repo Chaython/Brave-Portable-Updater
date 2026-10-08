@@ -51,7 +51,7 @@ if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
 
 # --- CONFIGURATION ---
 $TaskName        = "BravePortableUpdate"
-$TaskDescription = "Update Brave Portable ($Edition edition) at boot"
+$TaskDescription = "Update Brave Portable ($Edition edition) at logon"
 $CurrentScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $TaskCommand      = Join-Path $CurrentScriptDir "download_brave.ps1"
 $LogFile          = Join-Path $CurrentScriptDir "brave-update.log"
@@ -71,8 +71,13 @@ if ($Remove) {
 # Use -Command (instead of -File) so we can redirect all output streams to a
 # log file. The edition is forwarded to download_brave.ps1 so the task always
 # updates the channel the user selected.
-$innerCommand = "& '$TaskCommand' -Edition $Edition *>> '$LogFile'"
-$TaskArgument  = "-NoProfile -ExecutionPolicy Bypass -Command `"$innerCommand`""
+# Encode the script text rather than embedding paths in nested command quotes.
+# This safely handles apostrophes, spaces, and other shell metacharacters.
+$quotedScript = $TaskCommand.Replace("'", "''")
+$quotedLog = $LogFile.Replace("'", "''")
+$innerCommand = "try { & '$quotedScript' -Edition $Edition *>> '$quotedLog'; if (-not $?) { exit 1 } } catch { `$_ | Out-String | Add-Content -LiteralPath '$quotedLog'; exit 1 }"
+$encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($innerCommand))
+$TaskArgument = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encodedCommand"
 
 $TaskTrigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
 $TaskAction  = New-ScheduledTaskAction -Execute "powershell.exe" `
