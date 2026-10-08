@@ -242,6 +242,7 @@ impl Session {
                 return Err(io::Error::last_os_error().into());
             }
         }
+        fs::remove_file(&self.journal)?;
         Ok(())
     }
 }
