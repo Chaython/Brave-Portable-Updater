@@ -121,6 +121,7 @@ pub fn recover(root:&Path)->Result<()> {
     if state.keys.is_empty() {return Err("Recovery journal has no registry keys".into());}
     for entry in &state.keys {
         if entry.key != REGISTRY && entry.key != POLICY {return Err("Recovery journal contains an unexpected registry key".into());}
+        if (entry.key==REGISTRY && entry.portable!="portable-brave.reg") || (entry.key==POLICY && entry.portable!="portable-policy.reg") {return Err("Recovery journal has an invalid portable snapshot mapping".into());}
         if entry.existed {
             if Path::new(&entry.backup).components().count()!=1 {return Err("Invalid recovery backup name".into());}
             let backup=folder.join(&entry.backup);
