@@ -1,11 +1,11 @@
 <#
 .SYNOPSIS
     Registers (or removes) a Windows Scheduled Task that runs the Brave
-    Portable updater at system startup.
+    Portable updater when the configured user logs on.
 
 .DESCRIPTION
     Creates a scheduled task named "BravePortableUpdate" that launches
-    download_brave.ps1 at boot, passing through the chosen -Edition so that the
+    download_brave.ps1 on logon, passing through the chosen -Edition so that the
     scheduled task always updates the edition you actually want (instead of
     silently falling back to nightly). Output of the task is appended to
     brave-update.log next to this script for easy debugging.
@@ -23,7 +23,7 @@
 
 .EXAMPLE
     .\run_at_boot.ps1
-    Creates/updates the task to update the nightly edition at boot.
+    Creates/updates the task to update the nightly edition at logon.
 
 .EXAMPLE
     .\run_at_boot.ps1 -Edition beta
@@ -74,7 +74,7 @@ if ($Remove) {
 $innerCommand = "& '$TaskCommand' -Edition $Edition *>> '$LogFile'"
 $TaskArgument  = "-NoProfile -ExecutionPolicy Bypass -Command `"$innerCommand`""
 
-$TaskTrigger = New-ScheduledTaskTrigger -AtStartup
+$TaskTrigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
 $TaskAction  = New-ScheduledTaskAction -Execute "powershell.exe" `
     -Argument $TaskArgument `
     -WorkingDirectory $CurrentScriptDir
