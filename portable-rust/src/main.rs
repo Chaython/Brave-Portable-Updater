@@ -346,7 +346,16 @@ fn launch() -> Result<(), Box<dyn std::error::Error>> {
     // The launcher is movable: all paths are resolved relative to this executable.
     let executable = env::current_exe()?;
     let root = executable.parent().ok_or("Launcher has no parent directory")?;
+    if env::args_os().skip(1).any(|argument| argument == "--recover-registry") {
+        if env::args_os().count() != 2 {return Err("--recover-registry cannot be combined with other arguments".into());}
+        registry_swap::recover(root)?;
+        append_log(root, "Explicit registry recovery completed");
+        return Ok(());
+    }
     let config = settings(root)?;
+    if root.join("Data").join("Registry").join("active-session.json").exists() {
+        return Err("Interrupted registry swap detected. Close Brave, inspect Data/Registry backups, and run BravePortable.exe --recover-registry before another launch.".into());
+    }
     if config.registry_virtualization == "required" && !env::args_os().any(|arg| arg == "--update-only") {
         return Err("Full registry/group-policy virtualization is not implemented. Launch refused to protect host registry. Set registry_virtualization to off only if profile isolation is acceptable.".into());
     }
