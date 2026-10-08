@@ -26,9 +26,17 @@ jobs:
       - name: Compile standalone launcher
         shell: pwsh
         run: cargo build --release --manifest-path portable-rust/Cargo.toml --target x86_64-pc-windows-msvc
-      - name: Upload portable EXE
+      - name: Bundle portable launcher and scheduler
+        shell: pwsh
+        run: |
+          $bundle = 'portable-rust/dist'
+          New-Item -ItemType Directory -Path $bundle -Force | Out-Null
+          Copy-Item portable-rust/target/x86_64-pc-windows-msvc/release/BravePortable.exe $bundle/
+          Copy-Item portable-rust/setup-scheduler.ps1 $bundle/
+          Copy-Item portable-rust/README.md $bundle/
+      - name: Upload portable bundle
         uses: actions/upload-artifact@v4
         with:
           name: brave-portable-rust-x64
-          path: portable-rust/target/x86_64-pc-windows-msvc/release/BravePortable.exe
+          path: portable-rust/dist/
           if-no-files-found: error
