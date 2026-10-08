@@ -1,7 +1,7 @@
 //! Temporary, opt-in registry swapping. NOT virtualization.
 //! Native Windows Brave and policy keys are temporarily replaced and then restored.
 //! Files in Data/Registry permit manual recovery if a process crashes.
-use std::{env, error::Error, ffi::OsStr, fs, io, os::windows::ffi::OsStrExt, path::{Path,PathBuf}, process::Command, ptr};
+use std::{env, error::Error, ffi::OsStr, fs, io, os::windows::ffi::OsStrExt, path::{Path,PathBuf}, process::Command, ptr, time::Duration};
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 #[link(name="kernel32")]
@@ -73,6 +73,17 @@ fn ensure_no_brave()->Result<()>{
     }
     Ok(())
 }
+pub fn wait_for_brave_exit()->Result<()> {
+    loop {
+        match ensure_no_brave() {
+            Ok(()) => return Ok(()),
+            Err(error) if error.to_string() == "Close all Brave processes before registry-swapping mode" => {
+                std::thread::sleep(Duration::from_millis(800));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
 pub struct Session {folder:PathBuf,journal:PathBuf,state:State,_lock:Mutex}
 impl Session {
     pub fn start(root:&Path,profile:&Path,cache:&Path)->Result<Self>{
@@ -85,13 +96,15 @@ impl Session {
             return Err(format!("Interrupted registry swap: {journal:?}. Do not launch until original keys are recovered using the pre-session backups.").into());
         }
         let mut state=State{keys:Vec::new()};
+        let suffix = format!("{}-{}",std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_nanos());
         for (key,backup,portable) in [
             (REGISTRY,"host-brave.reg","portable-brave.reg"),
             (POLICY,"host-policy.reg","portable-policy.reg"),
         ]{
             let present=exists(key)?;
-            if present {export(key,&folder.join(backup))?;}
-            state.keys.push(KeyState{key:key.into(),existed:present,backup:backup.into(),portable:portable.into()});
+            let backup_name=format!("{suffix}-{backup}");
+            if present {export(key,&folder.join(&backup_name))?;}
+            state.keys.push(KeyState{key:key.into(),existed:present,backup:backup_name,portable:portable.into()});
         }
         // Journal MUST exist before modifying either live key.
         fs::write(&journal,serde_json::to_vec_pretty(&state)?)?;
