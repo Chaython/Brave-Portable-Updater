@@ -22,7 +22,7 @@ impl Mutex {
         let output=Command::new("whoami.exe").arg("/user").arg("/fo").arg("csv").arg("/nh").output()?;
         if !output.status.success() {return Err("Cannot determine user SID for registry lock".into());}
         let identity=String::from_utf8_lossy(&output.stdout);
-        let sid=identity.trim().trim_matches('"').split("","").last().unwrap_or("").trim_matches('"').replace('-', "_");
+        let sid=identity.trim().trim_matches('"').split("\",\"").last().unwrap_or("").trim_matches('"').replace('-', "_");
         if !sid.starts_with("S_1_") {return Err("Invalid user SID for registry lock".into());}
         let name=wide(OsStr::new(&format!("Local\\BravePortableState_{sid}")));
         let handle=unsafe{CreateMutexW(ptr::null_mut(),0,name.as_ptr())};
