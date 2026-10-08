@@ -182,7 +182,13 @@ impl Session {
         if restored.is_ok(){fs::remove_file(&self.journal)?;}
         restored?;
         if let Some(error)=capture_error {return Err(format!("Portable registry capture failed; previous snapshots preserved: {error}").into());}
-        for (staged,output) in pending { fs::rename(staged,output)?; }
+        for (staged,output) in pending {
+            let src=wide(staged.as_os_str());
+            let dst=wide(output.as_os_str());
+            if unsafe{MoveFileExW(src.as_ptr(),dst.as_ptr(),0x1|0x8)}==0 {
+                return Err(io::Error::last_os_error().into());
+            }
+        }
         Ok(())
     }
 }
