@@ -49,3 +49,8 @@ Despite the historical filename, this creates a **logon-triggered** Windows sche
 ## Requirements and limitations
 
 Windows PowerShell 5.1+ on Windows x64, an internet connection to GitHub releases, and enough free disk space for both staged and old Brave binaries. Registry/group-policy capture is enabled by default in the standalone launcher. Windows integration tests and crash-recovery validation remain necessary, especially when policy keys are ACL-protected. Back up `Data/registry` before first use.
+
+
+## Rust/MSIX alternative
+
+A separate packaged-desktop implementation is available under [`msix-rust/`](msix-rust/README.md). It bundles Brave and a Rust launcher in an MSIX so Windows handles supported HKCU registry virtualization instead of the root launcher's export/import swap. It is installed/signed, not USB-folder portable. See its README for build prerequisites and limitations.
