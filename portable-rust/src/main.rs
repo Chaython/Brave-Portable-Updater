@@ -408,7 +408,7 @@ fn launch() -> Result<(), Box<dyn std::error::Error>> {
         append_log(root, "WARNING: starting temporary HKCU Brave and group-policy registry swap (NOT virtualization)");
         Some(registry_swap::Session::start(root, &profile, &cache, !options.no_registry, !options.no_policy)?)
     } else { None };
-    let run_browser = || -> Result<(), Box<dyn std::error::Error>> {
+    let run_browser = move || -> Result<(), Box<dyn std::error::Error>> {
     let mut child = Command::new(&browser)
         .current_dir(browser.parent().ok_or("Missing Brave parent path")?)
         .env("APPDATA", &roaming)
@@ -419,6 +419,7 @@ fn launch() -> Result<(), Box<dyn std::error::Error>> {
         .arg("--disable-background-mode")
         .args(passthrough)
         .spawn()?;
+    drop(update_lock);
     append_log(root, &format!("Brave started with PID {}", child.id()));
     if options.no_wait { return Ok(()); }
     let status = child.wait()?;
@@ -429,7 +430,6 @@ fn launch() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
     };
     let launched = run_browser();
-    drop(update_lock);
     if let Some(session) = session {
         // Do not restore host registry while any Brave process may be alive.
         // If browser management fails, retain the journal and warn rather
