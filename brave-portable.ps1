@@ -172,7 +172,15 @@ if ($NoWait) { $NoRegistry = $true; $NoPolicy = $true }
 #  LAYER 4: REGISTRY BACKUP / RESTORE  (pre-launch)
 # ============================================================
  $registryManaged = $false
+ $sessionSetupCompleted = $false
+try {
 if (-not $NoRegistry) {
+    # A separate installed Brave can use these shared HKCU keys concurrently.
+    # Do not swap its registry while ANY Brave instance is running.
+    $runningBrave = @(Get-CimInstance Win32_Process -Filter "Name = 'brave.exe'" -ErrorAction Stop)
+    if ($runningBrave.Count -gt 0) {
+        throw 'Close all Brave sessions before starting registry-managed portable mode, or use -NoRegistry.'
+    }
     $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value.Replace('-', '_')
     $regMutex = New-Object System.Threading.Mutex($false, "Local\BravePortableRegistry_$sid")
     try { $regMutexHeld = $regMutex.WaitOne(0) }
@@ -227,6 +235,7 @@ if (-not $NoRegistry) {
         $registrySessionStarted = $true
     }
     $registryManaged = $true
+    $sessionSetupCompleted = $true
 } else {
     Write-Host "[registry] Skipped (-NoRegistry)."
 }
@@ -289,7 +298,6 @@ if ($NoWait) {
 }
 
 # --- WAIT FOR BRAVE TO EXIT, THEN CLEAN UP ---
-try {
     $proc = Start-Process -FilePath $braveExe.FullName -ArgumentList $argString -WorkingDirectory $ScriptDir -PassThru
     Write-Host "Brave PID: $($proc.Id). This window will stay open until Brave exits so registry cleanup can run."
     $proc.WaitForExit()
@@ -302,8 +310,26 @@ try {
     Write-Host ""
     Write-Host "Brave exited (code $($proc.ExitCode)). Running cleanup..."
 } finally {
+    # Cleanup now also covers registry initialization failures.
+    # If initialization did not reach a committed session, preserve recovery
+    # files and don't export potentially partial portable registry state.
+    if (-not $sessionSetupCompleted) {
+        if ($registrySessionStarted -and (Test-Path -LiteralPath $PreSessionRegFile)) {
+            # Restore the pre-launch snapshot even if the portable import failed.
+            if (Test-Path $BraveRegKeyPs) {
+                Remove-Item -LiteralPath $BraveRegKeyPs -Recurse -Force -ErrorAction Stop
+            }
+            & reg.exe import $PreSessionRegFile | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                throw "Initialization recovery failed; snapshot retained: $PreSessionRegFile"
+            }
+            Remove-Item -LiteralPath $sessionFile -Force -ErrorAction SilentlyContinue
+        }
+        if ($regMutexHeld) { $regMutex.ReleaseMutex(); $regMutexHeld = $false }
+        if ($regMutex) { $regMutex.Dispose() }
+    } else {
 
-    # --- CLEANUP: only meaningful if we waited for exit ---
+    # --- CLEANUP ---
 
     # (e) Persist this session's portable registry state.
     if ($registryManaged -and (Test-Path $BraveRegKeyPs)) {
@@ -332,4 +358,5 @@ try {
     if ($regMutexHeld) { $regMutex.ReleaseMutex(); $regMutexHeld = $false }
     if ($regMutex) { $regMutex.Dispose() }
     Write-Host "Cleanup complete."
+    }
 }
