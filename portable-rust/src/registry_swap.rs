@@ -168,18 +168,21 @@ impl Session {
     }
     pub fn finish(self)->Result<()>{
         let mut capture_error=None;
+        let mut pending=Vec::<(PathBuf,PathBuf)>::new();
         for key in &self.state.keys {
             let output=self.folder.join(&key.portable);
+            let staged=output.with_extension("pending.reg");
             match exists(&key.key) {
-                Ok(true)=>{if let Err(e)=export(&key.key,&output){capture_error=Some(e.to_string());}},
-                Ok(false)=>{let _=fs::remove_file(&output);},
+                Ok(true)=>{if let Err(e)=export(&key.key,&staged){capture_error=Some(e.to_string());}else{pending.push((staged,output));}},
+                Ok(false)=>{ /* keep last known portable snapshot until next valid session */ },
                 Err(e)=>capture_error=Some(e.to_string()),
             }
         }
         let restored=self.restore_host();
         if restored.is_ok(){fs::remove_file(&self.journal)?;}
         restored?;
-        if let Some(error)=capture_error {return Err(format!("Portable registry capture failed: {error}").into());}
+        if let Some(error)=capture_error {return Err(format!("Portable registry capture failed; previous snapshots preserved: {error}").into());}
+        for (staged,output) in pending { fs::rename(staged,output)?; }
         Ok(())
     }
 }
