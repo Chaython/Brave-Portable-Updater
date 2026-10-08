@@ -20,14 +20,16 @@ $zipFile = Join-Path $OutDir ('.brave-download-' + [guid]::NewGuid().ToString('N
 $mutex = $null
 $mutexAcquired = $false
 $committed = $false
+$hashAlgorithm = $null
 try {
     # Prevent two updater instances from interleaving their install/rollback.
     $mutexName = 'Local\BravePortableUpdater-' + ([Convert]::ToBase64String(
-        [Security.Cryptography.SHA256]::Create().ComputeHash(
+        ($hashAlgorithm = [Security.Cryptography.SHA256]::Create()).ComputeHash(
             [Text.Encoding]::UTF8.GetBytes($OutDir.ToLowerInvariant())
         )).TrimEnd('=').Replace('+','-').Replace('/','_'))
     $mutex = New-Object System.Threading.Mutex($false, $mutexName)
-    $mutexAcquired = $mutex.WaitOne(0)
+    try { $mutexAcquired = $mutex.WaitOne(0) }
+    catch [System.Threading.AbandonedMutexException] { $mutexAcquired = $true }
     if (-not $mutexAcquired) { throw "Another Brave Portable update is running for '$OutDir'." }
 
     $keyword = @{ nightly = 'Nightly'; beta = 'Beta'; stable = 'Release' }[$Edition]
@@ -121,4 +123,5 @@ try {
     if (Test-Path -LiteralPath $stagingDir) { Remove-Item -LiteralPath $stagingDir -Recurse -Force -ErrorAction SilentlyContinue }
     if ($mutexAcquired) { $mutex.ReleaseMutex() }
     if ($mutex) { $mutex.Dispose() }
+    if ($hashAlgorithm) { $hashAlgorithm.Dispose() }
 }
