@@ -423,7 +423,6 @@ fn launch() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
     };
     let launched = run_browser();
-    drop(update_lock);
     if let Some(session) = session {
         // Do not restore host registry while any Brave process may be alive.
         // If browser management fails, retain the journal and warn rather
@@ -435,6 +434,7 @@ fn launch() -> Result<(), Box<dyn std::error::Error>> {
         let restored = session.finish();
         restored?;
     }
+    drop(update_lock);
     launched
 }
 
