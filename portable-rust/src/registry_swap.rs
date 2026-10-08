@@ -224,7 +224,6 @@ impl Session {
             }
         }
         let restored=self.restore_host();
-        if restored.is_ok(){fs::remove_file(&self.journal)?;}
         restored?;
         if let Some(error)=capture_error {return Err(format!("Portable registry capture failed; previous snapshots preserved: {error}").into());}
         for (staged,output) in pending {
