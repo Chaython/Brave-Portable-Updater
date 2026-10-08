@@ -210,6 +210,22 @@ fn unpack_zip(archive: &Path, destination: &Path) -> Result<(), Box<dyn std::err
     browser_in(destination)?;
     Ok(())
 }
+fn ensure_brave_closed() -> Result<(), Box<dyn std::error::Error>> {
+    // Conservative protection: do not replace executable files while *any* Brave
+    // is running. This may also block on a separately installed Brave instance.
+    let output = Command::new("tasklist.exe")
+        .args(["/FI", "IMAGENAME eq brave.exe", "/FO", "CSV", "/NH"])
+        .output()?;
+    if !output.status.success() {
+        return Err("Cannot verify Brave process state; refusing to replace binaries".into());
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
+    if stdout.lines().any(|line| line.trim_start().starts_with("\"brave.exe\"")) {
+        return Err("Close all running Brave processes before updating App/".into());
+    }
+    Ok(())
+}
+
 fn ensure_browser(root: &Path, options: &DownloadOptions) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let app = root.join("App");
     let existing = browser_in(&app).ok();
@@ -238,6 +254,7 @@ fn ensure_browser(root: &Path, options: &DownloadOptions) -> Result<PathBuf, Box
     if asset.size == 0 || asset.size > 2_000_000_000 {
         return Err("Unreasonable Brave download size".into());
     }
+    if existing.is_some() { ensure_brave_closed()?; }
     let digest = asset.digest.ok_or("Release lacks SHA-256 digest; download aborted")?;
     let url = reqwest::Url::parse(&asset.browser_download_url)?;
     if url.scheme() != "https" || url.host_str() != Some("github.com") {
