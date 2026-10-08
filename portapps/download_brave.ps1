@@ -41,6 +41,8 @@ try {
         if ($releases.Count -eq 0) { break }
         foreach ($candidate in $releases) {
             if ($candidate.name -notmatch "(?i)\b$keyword\b") { continue }
+            # Stable must not select a prerelease or release candidate.
+            if ($Edition -eq 'stable' -and ($candidate.prerelease -or $candidate.name -match '(?i)release candidate|\bRC\b')) { continue }
             $found = @($candidate.assets | Where-Object { $_.name -match '^brave-v.*-win32-x64\.zip$' }) | Select-Object -First 1
             if ($found) { $release = $candidate; $asset = $found; break }
         }
