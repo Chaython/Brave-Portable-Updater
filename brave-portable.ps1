@@ -122,8 +122,9 @@ param(
 # ============================================================
 #  LOCATE brave.exe UNDER app\
 # ============================================================
- $braveExe = Get-ChildItem -Path $AppDir -Recurse -Filter "brave.exe" -File -ErrorAction SilentlyContinue |
-    Select-Object -First 1
+ $braveCandidates = @(Get-ChildItem -Path $AppDir -Recurse -Filter "brave.exe" -File -ErrorAction SilentlyContinue)
+if ($braveCandidates.Count -gt 1) { throw "Multiple Brave executables found. Clean old installations before launching." }
+ $braveExe = $braveCandidates | Select-Object -First 1
 if (-not $braveExe) {
     Write-Error "brave.exe was not found under '$AppDir'. Run download_brave.ps1 first."
     exit 1
@@ -160,6 +161,8 @@ foreach ($d in @($profileDir, $cacheDir, $appdataRoaming, $appdataLocal, $RegDir
 )
 if ($BraveArgs) { $argList += $BraveArgs }
  $argString = $argList -join " "
+# -NoWait must not leave temporary registry or policies installed.
+if ($NoWait) { $NoRegistry = $true; $NoPolicy = $true }
 
 # ============================================================
 #  LAYER 4: REGISTRY BACKUP / RESTORE  (pre-launch)
@@ -182,7 +185,8 @@ if (-not $NoRegistry) {
     # (b) Snapshot whatever is in the live key right now (real-install state,
     #     leftover portable state, or nothing) so we can restore it after.
     if (Test-Path $BraveRegKeyPs) {
-        cmd /c "reg.exe export $BraveRegKeyNative `"$PreSessionRegFile`" /y >nul 2>&1"
+        & reg.exe export $BraveRegKeyNative $PreSessionRegFile /y | Out-Null
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path $PreSessionRegFile)) { throw "Registry snapshot failed; refusing to clear real Brave settings." }
         Write-Host "[registry] Snapshotted live state -> pre-session.reg"
     } else {
         if (Test-Path $PreSessionRegFile) { Remove-Item $PreSessionRegFile -Force -ErrorAction SilentlyContinue }
@@ -195,7 +199,12 @@ if (-not $NoRegistry) {
 
     # (d) Import portable state from the previous session (if any).
     if (Test-Path $PortableRegFile) {
-        cmd /c "reg.exe import `"$PortableRegFile`" >nul 2>&1"
+        & reg.exe import $PortableRegFile | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            if (Test-Path $BraveRegKeyPs) { Remove-Item $BraveRegKeyPs -Recurse -Force -ErrorAction Stop }
+            if (Test-Path $PreSessionRegFile) { & reg.exe import $PreSessionRegFile | Out-Null }
+            throw "Portable registry import failed; stopped before launching Brave."
+        }
         Write-Host "[registry] Restored portable state <- brave-portable.reg"
     }
 
@@ -218,7 +227,8 @@ if (-not $NoRegistry) {
 #  helper processes that might not inherit the flags.
 # ============================================================
  $policyInjected = $false
-if (-not $NoPolicy) {
+if (-not $NoPolicy) { Write-Warning "Policy injection disabled to preserve existing Brave policies. Using command-line settings." }
+if ($false) {
     try {
         if (-not (Test-Path $PolicyRegKeyPs)) {
             New-Item -Path $PolicyRegKeyPs -Force -ErrorAction Stop | Out-Null
@@ -273,50 +283,21 @@ try {
 
     # (e) Persist this session's portable registry state.
     if ($registryManaged -and (Test-Path $BraveRegKeyPs)) {
-        cmd /c "reg.exe export $BraveRegKeyNative `"$PortableRegFile`" /y >nul 2>&1"
+        $tempExport = Join-Path $RegDir ("portable-" + [guid]::NewGuid().ToString("N") + ".reg")
+        & reg.exe export $BraveRegKeyNative $tempExport /y | Out-Null
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path $tempExport)) { throw "Registry export failed; live data left untouched." }
+        Move-Item -LiteralPath $tempExport -Destination $PortableRegFile -Force -ErrorAction Stop
         Write-Host "[registry] Saved portable state -> brave-portable.reg"
         # (f) Delete the live key.
         Remove-Item -Path $BraveRegKeyPs -Recurse -Force -ErrorAction SilentlyContinue
     }
 
-    # (g) Remove the injected policy keys -- but ONLY if we actually
-    #     injected them. If injection was denied there is nothing of ours
-    #     to remove, and attempting to delete HKCU\Software\Policies\...
-    #     would just throw the same permission error again.
-    if ($policyInjected) {
-        if (Test-Path $PolicyParentPs) {
-            Remove-Item -Path $PolicyParentPs -Recurse -Force -ErrorAction SilentlyContinue
-        }
-        # Also remove the empty Policies root if nothing else is using it.
-        $policyChildren = @(Get-ChildItem -Path $PolicyRootPs -ErrorAction SilentlyContinue)
-        if ($policyChildren.Count -eq 0) {
-            Remove-Item -Path $PolicyRootPs -Recurse -Force -ErrorAction SilentlyContinue
-        }
-        Write-Host "[policy] Removed injected group policies."
-    }
-
-    # (h) Clean up stray default-browser / app-paths keys Brave may have made.
-    foreach ($k in $StrayKeysPs) {
-        # RegisteredApplications holds many apps; only remove the Brave value,
-        # not the whole key.
-        if ($k -eq "HKCU:\Software\RegisteredApplications") {
-            $ra = Get-ItemProperty -Path $k -ErrorAction SilentlyContinue
-            if ($ra) {
-                $braveProps = $ra.PSObject.Properties | Where-Object { $_.Name -match "Brave" }
-                foreach ($p in $braveProps) {
-                    Remove-ItemProperty -Path $k -Name $p.Name -ErrorAction SilentlyContinue
-                }
-            }
-        } else {
-            if (Test-Path $k) {
-                Remove-Item -Path $k -Recurse -Force -ErrorAction SilentlyContinue
-            }
-        }
-    }
+    # Preserve existing system policy and browser registration keys.
 
     # (i) Restore the pre-session registry state (real install or empty).
     if ($registryManaged -and (Test-Path $PreSessionRegFile)) {
-        cmd /c "reg.exe import `"$PreSessionRegFile`" >nul 2>&1"
+        & reg.exe import $PreSessionRegFile | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Registry restore failed. Backup retained at $PreSessionRegFile" }
         Remove-Item $PreSessionRegFile -Force -ErrorAction SilentlyContinue
         Write-Host "[registry] Restored pre-session live state."
     }
