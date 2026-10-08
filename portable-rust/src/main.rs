@@ -119,6 +119,7 @@ struct DownloadOptions {
     force_update: bool,
     no_download: bool,
     update_only: bool,
+    no_wait: bool,
     passthrough: Vec<OsString>,
 }
 fn parse_options(config: &Settings) -> Result<DownloadOptions, Box<dyn std::error::Error>> {
@@ -126,6 +127,7 @@ fn parse_options(config: &Settings) -> Result<DownloadOptions, Box<dyn std::erro
     let mut force_update = false;
     let mut no_download = false;
     let mut update_only = false;
+    let mut no_wait = false;
     let mut passthrough = Vec::new();
     let mut args = env::args_os().skip(1);
     let mut forwarding = false;
@@ -134,6 +136,7 @@ fn parse_options(config: &Settings) -> Result<DownloadOptions, Box<dyn std::erro
         if !forwarding && value == "--" { forwarding = true; continue; }
         if !forwarding && matches!(value.as_ref(), "--update" | "--force" | "-Force") { force_update = true; continue; }
         if !forwarding && value == "--update-only" { update_only = true; force_update = true; continue; }
+        if !forwarding && matches!(value.as_ref(), "-NoWait" | "--no-wait") { no_wait = true; continue; }
         if !forwarding && value == "--no-download" { no_download = true; continue; }
         if !forwarding && (value == "--edition" || value == "-Edition") {
             edition = args.next().ok_or("--edition requires stable, beta or nightly")?
@@ -150,7 +153,7 @@ fn parse_options(config: &Settings) -> Result<DownloadOptions, Box<dyn std::erro
         return Err("Edition must be stable, beta or nightly".into());
     }
     if force_update && no_download { return Err("--update conflicts with --no-download".into()); }
-    Ok(DownloadOptions { edition, force_update, no_download, update_only, passthrough })
+    Ok(DownloadOptions { edition, force_update, no_download, update_only, no_wait, passthrough })
 }
 
 fn release_asset(client: &reqwest::blocking::Client, edition: &str)
@@ -234,6 +237,16 @@ fn ensure_brave_closed() -> Result<(), Box<dyn std::error::Error>> {
 
 fn ensure_browser(root: &Path, options: &DownloadOptions) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let app = root.join("App");
+    // Recover the single safely identifiable backup before fetching a new release.
+    if !app.exists() {
+        let backups: Vec<_> = fs::read_dir(root)?.filter_map(|v| v.ok()).filter(|v| v.file_name().to_string_lossy().starts_with(".app-backup-") && v.path().is_dir()).collect();
+        if backups.len() > 1 { return Err("Multiple Brave binary backups exist; recovery requires manual selection".into()); }
+        if let Some(backup) = backups.first() {
+            browser_in(&backup.path())?;
+            fs::rename(backup.path(), &app)?;
+            append_log(root, "Recovered interrupted App/ replacement from backup");
+        }
+    }
     let existing = browser_in(&app).ok();
     if existing.is_some() && !options.force_update { return Ok(existing.unwrap()); }
     if options.no_download { return Err("App/ has no valid Brave installation and downloads are disabled".into()); }
@@ -251,9 +264,9 @@ fn ensure_browser(root: &Path, options: &DownloadOptions) -> Result<PathBuf, Box
         }
         Err(error) => return Err(error),
     };
-    record_check(root);
     let marker = fs::read_to_string(app.join(".brave-portable-version")).unwrap_or_default();
     if existing.is_some() && marker.trim() == format!("{}|{}", options.edition, version) {
+        record_check(root);
         append_log(root, "Brave release is already current");
         return Ok(existing.unwrap());
     }
@@ -299,6 +312,7 @@ fn ensure_browser(root: &Path, options: &DownloadOptions) -> Result<PathBuf, Box
     let _ = fs::remove_file(&archive);
     if staging.exists() { let _ = fs::remove_dir_all(&staging); }
     install?;
+    record_check(root);
     append_log(root, &format!("Installed Brave {version} in {}", app.display()));
     Ok(browser_in(&app)?)
 }
@@ -337,6 +351,9 @@ fn launch() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    if options.no_wait && config.registry_virtualization == "swap" {
+        return Err("-NoWait is unsafe with registry swapping; set registry_virtualization to off".into());
+    }
     let session = if config.registry_virtualization == "swap" {
         append_log(root, "WARNING: starting temporary HKCU Brave and group-policy registry swap (NOT virtualization)");
         Some(registry_swap::Session::start(root, &profile, &cache)?)
@@ -353,6 +370,7 @@ fn launch() -> Result<(), Box<dyn std::error::Error>> {
         .args(passthrough)
         .spawn()?;
     append_log(root, &format!("Brave started with PID {}", child.id()));
+    if options.no_wait { return Ok(()); }
     let status = child.wait()?;
     append_log(root, &format!("Brave initial process exited: {status}"));
     if !status.success() {
