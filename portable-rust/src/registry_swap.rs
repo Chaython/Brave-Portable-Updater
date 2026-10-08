@@ -10,6 +10,7 @@ extern "system" {
     fn WaitForSingleObject(handle:isize, milliseconds:u32)->u32;
     fn ReleaseMutex(handle:isize)->i32;
     fn CloseHandle(handle:isize)->i32;
+    fn MoveFileExW(old:*const u16,new:*const u16,flags:u32)->i32;
 }
 const WAIT_OBJECT_0:u32=0; const WAIT_ABANDONED:u32=0x80; const WAIT_TIMEOUT:u32=0x102;
 fn wide(s:&OsStr)->Vec<u16>{s.encode_wide().chain(std::iter::once(0)).collect()}
@@ -51,9 +52,14 @@ fn exists(key:&str)->Result<bool>{
 }
 fn export(key:&str,path:&Path)->Result<()>{
     let destination=path.to_str().ok_or("Registry backup path isn't valid Unicode")?;
-    let tmp=path.with_extension("reg.tmp");
+    let tmp=path.with_extension("tmp.reg");
     reg(&["export",key,tmp.to_str().ok_or("Invalid temporary backup path")?,"/y"])?;
-    fs::rename(&tmp,destination)?;
+    let source_wide=wide(tmp.as_os_str());
+    let dest_wide=wide(OsStr::new(destination));
+    // Win32 atomic replacement supports repeat portable captures on Windows.
+    if unsafe{MoveFileExW(source_wide.as_ptr(),dest_wide.as_ptr(),0x1|0x8)}==0 {
+        return Err(io::Error::last_os_error().into());
+    }
     Ok(())
 }
 fn import(path:&Path)->Result<()>{
