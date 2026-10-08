@@ -75,7 +75,7 @@ if ($Remove) {
 # This safely handles apostrophes, spaces, and other shell metacharacters.
 $quotedScript = $TaskCommand.Replace("'", "''")
 $quotedLog = $LogFile.Replace("'", "''")
-$innerCommand = "try { & '$quotedScript' -Edition $Edition *>> '$quotedLog'; if (-not $?) { exit 1 } } catch { `$_ | Out-String | Add-Content -LiteralPath '$quotedLog'; exit 1 }"
+$innerCommand = "try { & '$quotedScript' -Edition $Edition *>> '$quotedLog'; if (-not `$?) { exit 1 } } catch { `$_ | Out-String | Add-Content -LiteralPath '$quotedLog'; exit 1 }"
 $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($innerCommand))
 $TaskArgument = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encodedCommand"
 
