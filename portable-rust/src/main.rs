@@ -124,7 +124,8 @@ fn verify_archive(path: &Path, digest: &str) -> Result<(), Box<dyn std::error::E
     }
     let mut hash = Sha256::new();
     let mut file = fs::File::open(path)?;
-    let mut chunk = [0u8; 1024 * 1024];
+    // Avoid a 1 MiB stack allocation on Windows (default thread stack ~1 MiB).
+    let mut chunk = [0u8; 32 * 1024];
     loop {
         let count = io::Read::read(&mut file, &mut chunk)?;
         if count == 0 { break; }
