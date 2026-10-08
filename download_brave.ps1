@@ -48,6 +48,15 @@ try {
     }
     if (-not $asset) { throw "No $Edition Windows x64 zip asset found in up to 1000 recent releases." }
     $version = $release.tag_name -replace '^v', ''
+    # Restore an interrupted swap BEFORE deciding that a version is current.
+    # Otherwise a missing app directory could be mistaken for a completed update.
+    $orphanBackups = @(Get-ChildItem -LiteralPath $OutDir -Directory -Filter '.app-backup-*' -ErrorAction Stop)
+    if (-not (Test-Path -LiteralPath $appDir) -and $orphanBackups.Count -eq 1) {
+        Move-Item -LiteralPath $orphanBackups[0].FullName -Destination $appDir -ErrorAction Stop
+        Write-Warning 'Restored a previous installation after an interrupted update.'
+    } elseif (-not (Test-Path -LiteralPath $appDir) -and $orphanBackups.Count -gt 1) {
+        throw 'Multiple interrupted backups exist; refusing to guess which is valid.'
+    }
     $installed = $null
     if (Test-Path -LiteralPath $versionFile) {
         $installed = (Get-Content -LiteralPath $versionFile -Raw).Trim()
@@ -61,7 +70,7 @@ try {
                 if ([version]$installedVersion -ge [version]$version -and
                     @(Get-ChildItem -LiteralPath $appDir -Filter brave.exe -Recurse -File -ErrorAction SilentlyContinue).Count -gt 0) {
                     Write-Host "Brave $Edition $installedVersion is already installed."
-                    exit 0
+                    return
                 }
             } catch { Write-Warning 'Cannot compare version tags; performing the update.' }
         }
@@ -89,18 +98,6 @@ try {
     if ($executables.Count -ne 1) { throw "Expected one brave.exe in the archive; found $($executables.Count)." }
     Set-Content -LiteralPath (Join-Path $stagingDir '.brave-portable-version') -Value "$Edition|$version" -Encoding UTF8 -NoNewline
 
-    # Detect an interrupted swap before touching the active installation.
-    # A previous backup is intentionally not deleted automatically because it
-    # might be the only working copy of the browser.
-    $orphanBackups = @(Get-ChildItem -LiteralPath $OutDir -Directory -Filter '.app-backup-*' -ErrorAction Stop)
-    if (-not (Test-Path -LiteralPath $appDir) -and $orphanBackups.Count -eq 1) {
-        Move-Item -LiteralPath $orphanBackups[0].FullName -Destination $appDir -ErrorAction Stop
-        Write-Warning 'Restored a previous installation left by an interrupted update.'
-    } elseif (-not (Test-Path -LiteralPath $appDir) -and $orphanBackups.Count -gt 1) {
-        throw 'Multiple interrupted update backups exist and app is missing. Manual recovery required; backups were preserved.'
-    } elseif ($orphanBackups.Count -gt 0) {
-        Write-Warning 'Previous update backups exist; inspect them after confirming Brave works.'
-    }
     # Never kill processes from a system-wide Brave installation.
     # Refuse to replace portable executables if any instance is using this app directory.
     $appPrefix = [IO.Path]::GetFullPath($appDir).TrimEnd([char]92) + [char]92
@@ -133,7 +130,7 @@ try {
     }
 } catch {
     Write-Error "Brave update failed: $($_.Exception.Message)"
-    exit 1
+    throw
 } finally {
     if (Test-Path -LiteralPath $zipFile) { Remove-Item -LiteralPath $zipFile -Force -ErrorAction SilentlyContinue }
     if (Test-Path -LiteralPath $stagingDir) { Remove-Item -LiteralPath $stagingDir -Recurse -Force -ErrorAction SilentlyContinue }
