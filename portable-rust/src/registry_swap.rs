@@ -130,6 +130,14 @@ pub fn recover(root:&Path)->Result<()> {
             if !canonical_backup.starts_with(&canonical_folder) {return Err("Recovery backup escapes registry folder".into());}
         }
     }
+    // Save the current live keys before restoring the older snapshot.
+    let stamp=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_nanos();
+    for entry in &state.keys {
+        if exists(&entry.key)? {
+            let name=if entry.key==REGISTRY {"brave"} else {"policy"};
+            export(&entry.key,&folder.join(format!("before-manual-recovery-{stamp}-{name}.reg")))?;
+        }
+    }
     // Preserve the journal if any restore step fails so recovery can be retried.
     let mut errors=Vec::new();
     for entry in &state.keys {
