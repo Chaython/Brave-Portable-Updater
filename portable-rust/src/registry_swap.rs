@@ -172,6 +172,16 @@ pub fn recover_snapshots(root:&Path)->Result<()> {
     let rollback=folder.join("snapshot-rollback");
     if rollback.is_dir() {
         let manifest=rollback.join("manifest.json");
+        if !manifest.exists() {
+            // The commit only starts after the manifest is written. No live snapshots changed.
+            fs::remove_dir_all(&rollback)?;
+            for entry in &state.keys {
+                let staged=folder.join(&entry.portable).with_extension("pending.reg");
+                if staged.exists() {fs::remove_file(staged)?;}
+            }
+            fs::remove_file(&journal)?;
+            return Ok(());
+        }
         let entries:Vec<(String,bool)>=serde_json::from_slice(&fs::read(&manifest)?)?;
         let mut seen=std::collections::HashSet::new();
         if entries.is_empty() || entries.len()>2 {return Err("Invalid rollback manifest size".into());}
