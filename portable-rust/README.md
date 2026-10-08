@@ -117,7 +117,12 @@ The launcher now blocks **every normal launch**, including profile-only launches
 After closing **all** Brave processes, inspect `Data/Registry/active-session.json` and its named `*-host-*.reg` backups. If these are the correct original Windows registry backups, explicitly invoke:
 
 ```powershell
-.\BravePortable.exe --recover-registry
+.\BravePortable.exe --recover-registry --confirm-restore
 ```
 
 The command takes a cross-launcher mutex, refuses to run if Brave is detected, validates that expected backup files exist, then restores the saved HKCU Brave and Brave user-policy keys. On failure, it preserves the recovery journal for another attempt. **It changes the real registry and is not safe if unrelated changes occurred since the backup**; inspect or export the current keys first if that is possible. This is deliberate manual recovery, not an automatic or crash-proof transaction.
+
+
+### Recovery hardening (October 2026)
+
+Explicit recovery now requires `--recover-registry --confirm-restore`. Before replacing the live HKCU Brave keys it saves available current keys as `Data/Registry/before-manual-recovery-*.reg`. Review both the live registry and saved backups first: confirmation does not establish that an older backup is preferable to newer changes. The journal is now checked for duplicate entries and backup path traversal. Normal session completion retains `active-session.json` until registry snapshot writes succeed; missing portable branches remove their old saved snapshot. The Rust update lock is held through browser process startup rather than only the update operation. Full multi-file transactional guarantees and Windows crash-recovery tests are still outstanding.
