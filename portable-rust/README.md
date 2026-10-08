@@ -10,7 +10,7 @@ Build on Windows using the Rust MSVC toolchain:
 cargo build --release --manifest-path portable-rust/Cargo.toml --target x86_64-pc-windows-msvc
 ```
 
-Place the resulting `BravePortable.exe` next to `App/` containing the extracted Brave binaries. Run the EXE without MSIX, registration, administrative rights, or code signing.
+**The GitHub Actions artifact contains the launcher only, not Brave.** Extract/download the Brave x64 ZIP with the repository updater, then place `BravePortable.exe` next to `App/` containing the extracted Brave binaries. Do not run the EXE directly from a download folder or `target/release` unless `App/` is also there. Run without MSIX, registration, administrative rights, or code signing.
 
 ```text
 BravePortable.exe
@@ -21,7 +21,7 @@ Data/
   AppData/
 ```
 
-The launcher forwards arguments and relocates the profile, disk cache and child environment paths inside `Data/`. Everything it directly creates is relative to its executable.
+The launcher forwards arguments and relocates the profile, disk cache and child environment paths inside `Data/`. Everything it directly creates is relative to its executable. If launch fails, a Windows message box now displays the error and details are appended to `Data/Logs/launcher.log`. Successful browser launches are logged too. If Brave itself immediately exits or redirects to another existing browser instance, inspect that log and close any existing Brave processes.
 
 ## Registry limitations — important
 
