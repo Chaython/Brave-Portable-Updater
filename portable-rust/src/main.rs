@@ -1,4 +1,5 @@
 #![cfg(windows)]
+mod registry_swap;
 use std::{env, ffi::{OsString, OsStr}, fs, io, path::{Path, PathBuf}, process::{Command, ExitCode}, time::{SystemTime, UNIX_EPOCH}};
 use std::os::windows::ffi::OsStrExt;
 use std::io::Write;
@@ -94,8 +95,8 @@ fn settings(root: &Path) -> Result<Settings, Box<dyn std::error::Error>> {
     if !matches!(parsed.update_frequency.as_str(), "never"|"launch"|"daily"|"weekly") {
         return Err("Data/settings.json: update_frequency must be never, launch, daily or weekly".into());
     }
-    if !matches!(parsed.registry_virtualization.as_str(), "off" | "required") {
-        return Err("Data/settings.json: registry_virtualization must be off or required".into());
+    if !matches!(parsed.registry_virtualization.as_str(), "off" | "required" | "swap") {
+        return Err("Data/settings.json: registry_virtualization must be off, required or swap".into());
     }
     Ok(parsed)
 }
@@ -336,6 +337,11 @@ fn launch() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    let session = if config.registry_virtualization == "swap" {
+        append_log(root, "WARNING: starting temporary HKCU Brave and group-policy registry swap (NOT virtualization)");
+        Some(registry_swap::Session::start(root, &profile, &cache)?)
+    } else { None };
+    let run_browser = || -> Result<(), Box<dyn std::error::Error>> {
     let mut child = Command::new(&browser)
         .current_dir(browser.parent().ok_or("Missing Brave parent path")?)
         .env("APPDATA", &roaming)
@@ -353,6 +359,20 @@ fn launch() -> Result<(), Box<dyn std::error::Error>> {
         return Err(format!("Brave exited with status {status}").into());
     }
     Ok(())
+    };
+    let launched = run_browser();
+    if let Some(session) = session {
+        // Do not restore host registry while any Brave process may be alive.
+        // If browser management fails, retain the journal and warn rather
+        // than blindly restoring keys under a running browser.
+        let settled = registry_swap::wait_for_brave_exit();
+        if let Err(error) = settled {
+            return Err(format!("Registry remains swapped; close Brave and manually recover backups: {error}").into());
+        }
+        let restored = session.finish();
+        restored?;
+    }
+    launched
 }
 
 fn main() -> ExitCode {
