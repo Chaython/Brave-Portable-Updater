@@ -33,16 +33,20 @@ try {
     if (-not $mutexAcquired) { throw "Another Brave Portable update is running for '$OutDir'." }
 
     $keyword = @{ nightly = 'Nightly'; beta = 'Beta'; stable = 'Release' }[$Edition]
-    $releases = @(Invoke-RestMethod -Uri 'https://api.github.com/repos/brave/brave-browser/releases?per_page=100' -Headers @{ 'User-Agent' = 'Brave-Portable-Updater'; 'Accept' = 'application/vnd.github+json' } -ErrorAction Stop)
     $release = $null
     $asset = $null
-    foreach ($candidate in $releases) {
-        # Match release title, not a partial substring (e.g. 'Prerelease').
-        if ($candidate.name -notmatch "(?i)\b$keyword\b") { continue }
-        $found = @($candidate.assets | Where-Object { $_.name -match '^brave-v.*-win32-x64\.zip$' }) | Select-Object -First 1
-        if ($found) { $release = $candidate; $asset = $found; break }
+    for ($page = 1; $page -le 10 -and -not $asset; $page++) {
+        $url = "https://api.github.com/repos/brave/brave-browser/releases?per_page=100&page=$page"
+        $releases = @(Invoke-RestMethod -Uri $url -Headers @{ 'User-Agent' = 'Brave-Portable-Updater'; 'Accept' = 'application/vnd.github+json' } -ErrorAction Stop)
+        if ($releases.Count -eq 0) { break }
+        foreach ($candidate in $releases) {
+            if ($candidate.name -notmatch "(?i)\b$keyword\b") { continue }
+            $found = @($candidate.assets | Where-Object { $_.name -match '^brave-v.*-win32-x64\.zip$' }) | Select-Object -First 1
+            if ($found) { $release = $candidate; $asset = $found; break }
+        }
+        if ($releases.Count -lt 100) { break }
     }
-    if (-not $asset) { throw "No $Edition Windows x64 zip asset found in the latest 100 releases." }
+    if (-not $asset) { throw "No $Edition Windows x64 zip asset found in up to 1000 recent releases." }
     $version = $release.tag_name -replace '^v', ''
     $installed = $null
     if (Test-Path -LiteralPath $versionFile) {
