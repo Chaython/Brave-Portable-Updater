@@ -187,8 +187,13 @@ pub fn recover_snapshots(root:&Path)->Result<()> {
             else if dest.exists() {fs::remove_file(dest)?;}
         }
         fs::remove_dir_all(&rollback)?;
-    } else if state.keys.iter().any(|k|folder.join(&k.portable).with_extension("pending.reg").exists()) {
-        return Err("Pending snapshots require manual inspection before clearing journal".into());
+    } else {
+        // No snapshot commit began if the rollback directory was never created.
+        // Pending captures are discarded: previous committed snapshots remain intact.
+        for entry in &state.keys {
+            let staged=folder.join(&entry.portable).with_extension("pending.reg");
+            if staged.exists() {fs::remove_file(staged)?;}
+        }
     }
     fs::remove_file(&journal)?;
     Ok(())
