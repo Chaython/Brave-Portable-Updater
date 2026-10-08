@@ -345,6 +345,12 @@ fn launch() -> Result<(), Box<dyn std::error::Error>> {
     // The launcher is movable: all paths are resolved relative to this executable.
     let executable = env::current_exe()?;
     let root = executable.parent().ok_or("Launcher has no parent directory")?;
+    if env::args_os().skip(1).any(|argument| argument == "--recover-snapshots") {
+        if env::args_os().count()!=2 {return Err("--recover-snapshots takes no other arguments".into());}
+        registry_swap::recover_snapshots(root)?;
+        append_log(root,"Portable snapshot recovery completed");
+        return Ok(());
+    }
     if env::args_os().skip(1).any(|argument| argument == "--recover-registry") {
         if env::args_os().count() != 3 || !env::args_os().any(|argument| argument == "--confirm-restore") {return Err("Recovery requires --recover-registry --confirm-restore after reviewing live registry and backups".into());}
         registry_swap::recover(root)?;
@@ -423,6 +429,7 @@ fn launch() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
     };
     let launched = run_browser();
+    drop(update_lock);
     if let Some(session) = session {
         // Do not restore host registry while any Brave process may be alive.
         // If browser management fails, retain the journal and warn rather
@@ -434,7 +441,6 @@ fn launch() -> Result<(), Box<dyn std::error::Error>> {
         let restored = session.finish();
         restored?;
     }
-    drop(update_lock);
     launched
 }
 
