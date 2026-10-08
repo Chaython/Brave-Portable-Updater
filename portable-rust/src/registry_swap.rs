@@ -95,7 +95,7 @@ pub fn wait_for_brave_exit()->Result<()> {
 }
 pub struct Session {folder:PathBuf,journal:PathBuf,state:State,_lock:Mutex}
 impl Session {
-    pub fn start(root:&Path,profile:&Path,cache:&Path)->Result<Self>{
+    pub fn start(root:&Path,profile:&Path,cache:&Path,include_registry:bool,include_policy:bool)->Result<Self>{
         let lock=Mutex::lock()?;
         // Avoid modifying host keys when a prior portable session is unfinished.
         ensure_no_brave()?;
@@ -111,6 +111,7 @@ impl Session {
             (REGISTRY,"host-brave.reg","portable-brave.reg"),
             (POLICY,"host-policy.reg","portable-policy.reg"),
         ]{
+            if (key==REGISTRY && !include_registry) || (key==POLICY && !include_policy) {continue;}
             let present=exists(key)?;
             let backup_name=format!("{suffix}-{backup}");
             if present {export(key,&folder.join(&backup_name))?;}
@@ -119,7 +120,7 @@ impl Session {
         // Journal MUST exist before modifying either live key.
         fs::write(&journal,serde_json::to_vec_pretty(&state)?)?;
         let session=Self{folder,journal,state,_lock:lock};
-        if let Err(error)=session.activate(profile,cache){
+        if let Err(error)=session.activate(profile,cache,include_policy){
             // On partial activation, restore immediately; preserve journal when this fails.
             if session.restore_host().is_ok(){
                 let _=fs::remove_file(&session.journal);
@@ -128,12 +129,13 @@ impl Session {
         }
         Ok(session)
     }
-    fn activate(&self,profile:&Path,cache:&Path)->Result<()>{
+    fn activate(&self,profile:&Path,cache:&Path,include_policy:bool)->Result<()>{
         for key in &self.state.keys {
             delete(&key.key)?;
             let file=self.folder.join(&key.portable);
             if file.exists(){import(&file)?;}
         }
+        if !include_policy {return Ok(());}
         // Portable policies override portable settings, NEVER existing host policies.
         // Both are restored at end of session.
         for (name,value) in [
