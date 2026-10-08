@@ -7,9 +7,9 @@ Update and launch Brave Stable, Beta, or Nightly without affecting unrelated Bra
 - **Root / standalone:** `download_brave.ps1` downloads the browser and `brave-portable.ps1` launches it using `Data/profile`, `Data/cache`, and redirected APPDATA/LOCALAPPDATA.
 - **portapps/**: Updater scripts for an existing portapps.io `brave-portable.exe` wrapper. The wrapper handles its own portability.
 
-**Important:** The standalone launcher no longer swaps, deletes, exports, or imports the Windows Brave registry, and does not inject group policies. This removes a class of registry corruption and crash-recovery hazards. It is profile isolation, **not a full Windows sandbox**: Brave or Windows may still write other OS-level integration data. Avoid making portable Brave your default browser if you want to minimize this.
+**Important:** The standalone launcher now captures HKCU Brave registry and Brave group-policy keys. It backs up any existing keys, imports the saved portable state, and restores the original state after Brave exits. This involves replacing shared registry keys temporarily; it is **not crash-proof or a full Windows sandbox**. Avoid launching concurrently with a normal Brave installation.
 
-Older `Data/registry/*.reg` files from previous versions are left untouched for manual recovery. Back them up before removing them. `-NoRegistry` and `-NoPolicy` are still accepted for compatibility, but registry and policy mutation are now always disabled.
+Portable registry state is stored under `Data/registry` (`portable.reg` and `portable-policy.reg`). Pre-session snapshots (`before.reg`, `before-policy.reg`) are kept for recovery. If `active-session.json` remains after a crash, the launcher stops rather than risking automatic destructive recovery. `-NoRegistry` and `-NoPolicy` disable each capture layer; `-NoWait` requires both to be disabled.
 
 ## Update
 
@@ -32,10 +32,10 @@ Downloaded archives are extracted into a staging folder and validated before swi
 .\brave-portable.ps1
 .\brave-portable.ps1 --incognito
 .\brave-portable.ps1 https://example.com
-.\brave-portable.ps1 -NoWait
+.\brave-portable.ps1 -NoWait -NoRegistry -NoPolicy
 ```
 
-The launcher waits for the browser and its visible portable `brave.exe` child processes unless `-NoWait` is used. It rejects custom `--user-data-dir` and `--disk-cache-dir` overrides.
+The launcher waits for the browser and its visible portable `brave.exe` child processes unless `-NoWait` is used. It rejects custom `--user-data-dir` and `--disk-cache-dir` overrides. **Close normal Brave before launching** to avoid simultaneous access to shared registry keys.
 
 ## Scheduled update
 
@@ -48,4 +48,4 @@ Despite the historical filename, this creates a **logon-triggered** Windows sche
 
 ## Requirements and limitations
 
-Windows PowerShell 5.1+ on Windows x64, an internet connection to GitHub releases, and enough free disk space for both staged and old Brave binaries. Registry isolation is deliberately not provided by the standalone launcher. A Windows integration test is recommended before relying on unattended updates.
+Windows PowerShell 5.1+ on Windows x64, an internet connection to GitHub releases, and enough free disk space for both staged and old Brave binaries. Registry/group-policy capture is enabled by default in the standalone launcher. Windows integration tests and crash-recovery validation remain necessary, especially when policy keys are ACL-protected. Back up `Data/registry` before first use.
