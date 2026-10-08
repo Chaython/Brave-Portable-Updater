@@ -142,3 +142,8 @@ Windows x64 native registry access now sign-extends `HKEY_CURRENT_USER` correctl
 ```
 
 This restores the previous portable snapshot generation from `Data/Registry/snapshot-rollback/` using its deletion-aware manifest. It does not alter host registry keys. If the journal instead indicates the host has **not** been restored, investigate the actual registry state before using the existing explicit `--recover-registry --confirm-restore` command. Recovery is still not crash-atomic across the Windows registry and the on-disk journal. The exclusive updater lock is now released after successful Brave process creation; concurrent launches are no longer held up for the entire browser session, although an update may still be denied while a Brave process is running.
+
+
+### Interruption hardening notes
+
+The launcher now refuses automatic **host** registry restoration when the journal cannot prove whether restoration already happened. This deliberately replaces the earlier risky recovery behavior: preserve the registry exports, inspect the live host state, and recover it manually if necessary. Snapshot-only recovery accepts an interrupted preparation without a completed manifest, validates complete rollback entries before writes, and can discard uncommitted captures after a capture failure. A busy update lock now reports an explicit retry message instead of appearing to be an installation failure. These protections are fail-closed safeguards rather than crash-atomic Windows registry transactions.\n
