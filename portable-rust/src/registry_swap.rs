@@ -159,11 +159,24 @@ pub fn recover_snapshots(root:&Path)->Result<()> {
     let journal=folder.join("active-session.json");
     let state:State=serde_json::from_slice(&fs::read(&journal)?)?;
     if !state.host_restored {return Err("Host registry still requires recovery first".into());}
+    if state.keys.is_empty() || state.keys.len()>2 {return Err("Invalid snapshot recovery journal".into());}
+    let mut seen=std::collections::HashSet::new();
+    for entry in &state.keys {
+        if !seen.insert(&entry.key) ||
+            !((entry.key==REGISTRY && entry.portable=="portable-brave.reg") ||
+              (entry.key==POLICY && entry.portable=="portable-policy.reg")) {
+            return Err("Invalid snapshot recovery entry".into());
+        }
+    }
     let rollback=folder.join("snapshot-rollback");
     if rollback.is_dir() {
-        for name in ["portable-brave.reg","portable-policy.reg"] {
-            let old=rollback.join(name);
-            if old.exists() {fs::copy(old,folder.join(name))?;}
+        let manifest=rollback.join("manifest.json");
+        let entries:Vec<(String,bool)>=serde_json::from_slice(&fs::read(&manifest)?)?;
+        for (name,existed) in entries {
+            if name!="portable-brave.reg" && name!="portable-policy.reg" {return Err("Invalid rollback manifest entry".into());}
+            let dest=folder.join(&name);
+            if existed {fs::copy(rollback.join(&name),&dest)?;}
+            else if dest.exists() {fs::remove_file(dest)?;}
         }
         fs::remove_dir_all(&rollback)?;
     } else if state.keys.iter().any(|k|folder.join(&k.portable).with_extension("pending.reg").exists()) {
@@ -270,6 +283,8 @@ impl Session {
             if existed {fs::copy(output,rollback.join(name))?;}
             manifest.push((output.clone(),existed));
         }
+        let rollback_manifest:Vec<(String,bool)>=manifest.iter().map(|(path,existed)|(path.file_name().unwrap().to_string_lossy().into_owned(),*existed)).collect();
+        fs::write(rollback.join("manifest.json"),serde_json::to_vec_pretty(&rollback_manifest)?)?;
         let commit = (|| -> Result<()> {
             for (staged,output) in &pending {
                 if staged.as_os_str().is_empty() {
