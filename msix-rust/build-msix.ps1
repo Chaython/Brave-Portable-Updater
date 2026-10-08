@@ -37,9 +37,9 @@ New-Item -ItemType Directory -Path $out -Force | Out-Null
 $launcher=Join-Path $PSScriptRoot 'target\x86_64-pc-windows-msvc\release\BravePortableMsix.exe'
 Copy-Item -LiteralPath $launcher -Destination $stage -ErrorAction Stop
 Copy-Item -LiteralPath $src -Destination (Join-Path $stage 'App') -Recurse -Force
-$manifest=(Get-Content -LiteralPath (Join-Path $PSScriptRoot 'AppxManifest.xml.in') -Raw).
- Replace('__PUBLISHER__',[System.Security.SecurityElement]::Escape($Publisher)).
- Replace('__VERSION__',$Version)
+$manifest = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'AppxManifest.xml.in') -Raw
+$manifest = $manifest.Replace('__PUBLISHER__', [System.Security.SecurityElement]::Escape($Publisher))
+$manifest = $manifest.Replace('__VERSION__', $Version)
 [IO.File]::WriteAllText((Join-Path $stage 'AppxManifest.xml'),$manifest,(New-Object Text.UTF8Encoding($false)))
 $assets=Join-Path $stage 'Assets'
 New-Item -ItemType Directory -Path $assets -Force | Out-Null
