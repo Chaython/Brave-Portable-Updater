@@ -1,0 +1,15 @@
+[package]
+name = "brave-portable-msix"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "MSIX-packaged Rust launcher for Brave"
+
+[[bin]]
+name = "BravePortableMsix"
+path = "src/main.rs"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
