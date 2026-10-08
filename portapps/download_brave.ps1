@@ -103,7 +103,7 @@ try {
     }
     # Never kill processes from a system-wide Brave installation.
     # Refuse to replace portable executables if any instance is using this app directory.
-    $appPrefix = [IO.Path]::GetFullPath($appDir).TrimEnd('\') + '\'
+    $appPrefix = [IO.Path]::GetFullPath($appDir).TrimEnd([char]92) + [char]92
     foreach ($process in @(Get-CimInstance Win32_Process -Filter "Name='brave.exe'" -ErrorAction Stop)) {
         # Missing paths are ambiguous; fail closed rather than replace binaries in use.
         if ([string]::IsNullOrEmpty($process.ExecutablePath)) {
