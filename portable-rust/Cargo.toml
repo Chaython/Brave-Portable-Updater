@@ -1,0 +1,15 @@
+[package]
+name = "brave-portable-rust"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Installation-free Brave portable launcher"
+
+[[bin]]
+name = "BravePortable"
+path = "src/main.rs"
+
+[profile.release]
+lto = true
+strip = true
+codegen-units = 1
