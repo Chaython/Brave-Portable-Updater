@@ -48,7 +48,8 @@ On first run, the launcher creates `Data/settings.json` beside the EXE:
   "edition": "stable",
   "update_frequency": "daily",
   "check_on_launch": true,
-  "scheduled_updates": false
+  "scheduled_updates": false,
+  "registry_virtualization": "off"
 }
 ```
 
@@ -56,6 +57,7 @@ On first run, the launcher creates `Data/settings.json` beside the EXE:
 - `update_frequency`: `never`, `launch`, `daily`, or `weekly`. The launcher remembers the last successful GitHub release check in `Data/last-update-check`; `daily` and `weekly` are minimum intervals, not background timers.
 - `check_on_launch`: whether ordinary launches perform due update checks. It does not disable first-time installation if Brave is missing.
 - `scheduled_updates`: opt-in to an external Windows Task Scheduler task.
+- `registry_virtualization`: `off` (current profile-only behavior) or `required`. `required` currently **refuses to launch**, because a genuine all-process registry and policy interception engine does not yet exist. It does not silently fall back to writes to the Windows registry.
 
 To register/update the scheduler after placing `setup-scheduler.ps1` beside the EXE:
 
@@ -69,6 +71,10 @@ The scheduler runs `BravePortable.exe --update-only`, without opening a browser.
 Other supported flags: `--update`, `--force` / `-Force`, `--edition stable|beta|nightly` / `-Edition`, `--no-download`, `--update-only`, and `--` for browser arguments. These are not complete equivalents of the PowerShell scripts: `-OutDir`, `-NoRegistry`, `-NoPolicy`, and `-NoWait` are not implemented in Rust. The Rust launcher continues to have **no registry/group-policy virtualization**, and its settings are separate from other launcher versions.
 
 **Updates are blocked when any Brave process is running**, including unrelated installed Brave instances, to avoid replacing in-use executables. Close Brave and retry if an update fails. An interrupted update may leave `.app-backup-*` or `.app-staging-*` directories; do not delete them until you've confirmed your existing App works.
+
+## Registry virtualization — implementation boundary
+
+A portable Rust EXE alone does not redirect Windows registry operations of another executable. `RegOverridePredefKey` affects only its calling process, and Brave uses a multi-process architecture. A working backend must include interception/virtual namespace handling inside each Brave process, cover Win32 and native registry paths, preserve binary value types and deletion semantics, propagate to child processes, and verify isolation before launching. No such backend has been delivered in this repository; **do not infer isolation from the `Data` directory**.
 
 ## Registry limitations — important
 
