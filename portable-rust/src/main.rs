@@ -332,10 +332,20 @@ fn launch() -> Result<(), Box<dyn std::error::Error>> {
         return Err("Full registry/group-policy virtualization is not implemented. Launch refused to protect host registry. Set registry_virtualization to off only if profile isolation is acceptable.".into());
     }
     let mut options = parse_options(&config)?;
+    let explicit_update = options.force_update || options.update_only;
     if !options.no_download && !options.force_update && config.check_on_launch && check_due(root, &config.update_frequency) {
         options.force_update = true;
     }
-    let browser = ensure_browser(root, &options)?;
+    let browser = match ensure_browser(root, &options) {
+        Ok(browser) => browser,
+        Err(error) if !explicit_update && !options.update_only => {
+            if let Ok(existing) = browser_in(&root.join("App")) {
+                append_log(root, &format!("Automatic update deferred; using installed Brave: {error}"));
+                existing
+            } else { return Err(error); }
+        }
+        Err(error) => return Err(error),
+    };
     if options.update_only { return Ok(()); }
     append_log(root, &format!("Launching browser at {}", browser.display()));
     let data = root.join("Data");
