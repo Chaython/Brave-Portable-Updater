@@ -10,7 +10,22 @@ Build on Windows using the Rust MSVC toolchain:
 cargo build --release --manifest-path portable-rust/Cargo.toml --target x86_64-pc-windows-msvc
 ```
 
-**The GitHub Actions artifact contains the launcher only, not Brave.** Extract/download the Brave x64 ZIP with the repository updater, then place `BravePortable.exe` next to `App/` containing the extracted Brave binaries. Do not run the EXE directly from a download folder or `target/release` unless `App/` is also there. Run without MSIX, registration, administrative rights, or code signing.
+The GitHub Actions artifact contains the Rust launcher. **On first launch, if `App/` has no valid Brave installation, it automatically downloads the latest Stable Windows x64 ZIP from Brave's official GitHub releases, requires GitHub's SHA-256 digest, verifies the archive, safely extracts it to a staging folder and installs it to `App/`.** There is no need to run the PowerShell updater first. If Brave is already installed, the launcher starts without requiring an internet connection.
+
+The executable can be placed in an empty writable folder; it creates the required subdirectories. No MSIX, installation, or administrator privileges are needed.
+
+Supported launcher arguments:
+
+```powershell
+.\BravePortable.exe                       # install Stable if missing, then launch
+.\BravePortable.exe --edition beta         # select Beta for first-time installation
+.\BravePortable.exe --edition nightly      # select Nightly for first-time installation
+.\BravePortable.exe --update               # download selected channel again and replace App/
+.\BravePortable.exe --no-download          # offline-only; error if App/ is missing
+.\BravePortable.exe -- --incognito          # forward browser arguments
+```
+
+`--edition` chooses which release to download but does not replace an existing installation unless `--update` is also supplied. Avoid `--update` while portable Brave processes are running; this still needs explicit process-exclusion safeguards and Windows testing.
 
 ```text
 BravePortable.exe
@@ -21,7 +36,7 @@ Data/
   AppData/
 ```
 
-The launcher forwards arguments and relocates the profile, disk cache and child environment paths inside `Data/`. Everything it directly creates is relative to its executable. If launch fails, a Windows message box now displays the error and details are appended to `Data/Logs/launcher.log`. Successful browser launches are logged too. If Brave itself immediately exits or redirects to another existing browser instance, inspect that log and close any existing Brave processes.
+The launcher forwards arguments and relocates the profile, disk cache and child environment paths inside `Data/`. Everything it directly creates is relative to its executable. Download and installation diagnostics, launch status, and errors are recorded in `Data/Logs/launcher.log`. If launch fails, a Windows message box displays the error and details are appended to `Data/Logs/launcher.log`. Successful browser launches are logged too. If Brave itself immediately exits or redirects to another existing browser instance, inspect that log and close any existing Brave processes.
 
 ## Registry limitations — important
 
