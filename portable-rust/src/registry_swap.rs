@@ -122,6 +122,7 @@ pub fn recover(root:&Path)->Result<()> {
     for entry in &state.keys {
         if entry.key != REGISTRY && entry.key != POLICY {return Err("Recovery journal contains an unexpected registry key".into());}
         if entry.existed {
+            if Path::new(&entry.backup).components().count()!=1 {return Err("Invalid recovery backup name".into());}
             let backup=folder.join(&entry.backup);
             if !backup.is_file() {return Err(format!("Recovery backup missing: {}", backup.display()).into());}
             let canonical_folder=fs::canonicalize(&folder)?;
