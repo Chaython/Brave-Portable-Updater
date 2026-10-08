@@ -11,7 +11,6 @@ extern "system" {
     fn ReleaseMutex(handle:isize)->i32;
     fn CloseHandle(handle:isize)->i32;
     fn MoveFileExW(old:*const u16,new:*const u16,flags:u32)->i32;
-    fn GetCurrentProcessId()->u32;
 }
 const WAIT_OBJECT_0:u32=0; const WAIT_ABANDONED:u32=0x80; const WAIT_TIMEOUT:u32=0x102;
 fn wide(s:&OsStr)->Vec<u16>{s.encode_wide().chain(std::iter::once(0)).collect()}
@@ -19,8 +18,13 @@ struct Mutex(isize);
 impl Mutex {
     fn lock()->Result<Self>{
         // This named lock serializes participating sessions across folders in this user.
-        let username=env::var("USERDOMAIN").unwrap_or_default() + "_" + &env::var("USERNAME").unwrap_or_else(|_|"unknown".into());
-        let name=wide(OsStr::new(&format!("Local\\BravePortableRegistrySwap_{username}")));
+        // Match the existing PowerShell launcher's mutex naming convention.
+        let output=Command::new("whoami.exe").arg("/user").arg("/fo").arg("csv").arg("/nh").output()?;
+        if !output.status.success() {return Err("Cannot determine user SID for registry lock".into());}
+        let identity=String::from_utf8_lossy(&output.stdout);
+        let sid=identity.trim().trim_matches('"').split("","").last().unwrap_or("").trim_matches('"').replace('-', "_");
+        if !sid.starts_with("S_1_") {return Err("Invalid user SID for registry lock".into());}
+        let name=wide(OsStr::new(&format!("Local\\BravePortableState_{sid}")));
         let handle=unsafe{CreateMutexW(ptr::null_mut(),0,name.as_ptr())};
         if handle==0{return Err(io::Error::last_os_error().into());}
         match unsafe{WaitForSingleObject(handle,0)} {
@@ -47,7 +51,7 @@ fn exists(key:&str)->Result<bool>{
     let status=Command::new("reg.exe").args(["query",key]).output()?;
     match status.status.code(){
         Some(0)=>Ok(true),
-        Some(1) if String::from_utf8_lossy(&status.stderr).trim().is_empty() && String::from_utf8_lossy(&status.stdout).to_ascii_lowercase().contains("unable to find") => Ok(false),
+        Some(1) if { let message=format!("{} {}",String::from_utf8_lossy(&status.stdout),String::from_utf8_lossy(&status.stderr)).to_ascii_lowercase(); message.contains("unable to find") || message.contains("cannot find") } => Ok(false),
         _=>Err(format!("Could not query registry key {key}: {}",String::from_utf8_lossy(&status.stderr)).into()),
     }
 }
