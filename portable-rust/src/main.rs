@@ -207,8 +207,11 @@ fn verify_archive(path: &Path, digest: &str) -> Result<(), Box<dyn std::error::E
 }
 fn unpack_zip(archive: &Path, destination: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let mut zip = zip::ZipArchive::new(fs::File::open(archive)?)?;
+    let mut total_size: u64 = 0;
     for index in 0..zip.len() {
         let mut entry = zip.by_index(index)?;
+        total_size = total_size.checked_add(entry.size()).ok_or("Brave ZIP expanded size overflow")?;
+        if total_size > 6_000_000_000 { return Err("Brave ZIP expanded contents exceed 6 GB safety limit".into()); }
         let safe = entry.enclosed_name().ok_or("Unsafe path in Brave ZIP")?.to_path_buf();
         if entry.unix_mode().map(|mode| mode & 0o170000 == 0o120000).unwrap_or(false) {
             return Err("Symlinks are not supported in the Brave archive".into());
@@ -260,6 +263,7 @@ fn ensure_browser(root: &Path, options: &DownloadOptions) -> Result<PathBuf, Box
     let app = root.join("App");
     // Recover the single safely identifiable backup before fetching a new release.
     if !app.exists() {
+        ensure_brave_closed()?;
         let backups: Vec<_> = fs::read_dir(root)?.filter_map(|v| v.ok()).filter(|v| v.file_name().to_string_lossy().starts_with(".app-backup-") && v.path().is_dir()).collect();
         if backups.len() > 1 { return Err("Multiple Brave binary backups exist; recovery requires manual selection".into()); }
         if let Some(backup) = backups.first() {
@@ -353,7 +357,7 @@ fn launch() -> Result<(), Box<dyn std::error::Error>> {
     }
     let browser = match ensure_browser(root, &options) {
         Ok(browser) => browser,
-        Err(error) if !explicit_update && !options.update_only => {
+        Err(error) if !explicit_update && !options.update_only && !root.join("Data").join("Registry").join("active-session.json").exists() => {
             if let Ok(existing) = browser_in(&root.join("App")) {
                 append_log(root, &format!("Automatic update deferred; using installed Brave: {error}"));
                 existing
