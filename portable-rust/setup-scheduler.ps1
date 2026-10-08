@@ -21,10 +21,12 @@ if ($frequency -notin @('never','launch','daily','weekly')) {
     throw "Invalid update_frequency in $settingsFile"
 }
 $resolvedRoot = [IO.Path]::GetFullPath($root).TrimEnd([char]92).ToLowerInvariant()
-$sha = [Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($resolvedRoot))
-$id = [Convert]::ToHexString($sha).Substring(0,16)
+$algorithm = [Security.Cryptography.SHA256]::Create()
+try { $sha = $algorithm.ComputeHash([Text.Encoding]::UTF8.GetBytes($resolvedRoot)) }
+finally { $algorithm.Dispose() }
+$id = ([BitConverter]::ToString($sha) -replace '-', '').Substring(0,16)
 $name = "BravePortableRustUpdate-$id"
-if ($Remove -or $frequency -eq 'never') {
+if ($Remove -or $frequency -eq 'never' -or -not $settings.scheduled_updates) {
     Unregister-ScheduledTask -TaskName $name -Confirm:$false -ErrorAction SilentlyContinue
     Write-Host "Removed task $name (if present)."
     exit 0
